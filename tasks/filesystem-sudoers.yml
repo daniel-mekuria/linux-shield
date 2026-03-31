@@ -1,0 +1,49 @@
+---
+- name: Set file permissions/ownership for sudoers
+  ansible.builtin.file:
+    path: /etc/{{ item }}
+    mode: g-w,o-rwx
+    owner: root
+    group: root
+  become: true
+  tags:
+    - permissions
+    - sudo
+  with_items:
+    - sudoers.d
+    - sudoers
+# ANSSI-BP-028 R38 - Creating a group dedicated to the use of sudo
+- name: Set file permissions/ownership for sudo
+  ansible.builtin.file:
+    path: /usr/bin/sudo
+    mode: '4750'
+    owner: root
+    group: '{{ sudo_group }}'
+  become: true
+  tags:
+    # These are commented out, to not to shoot yourself in the foot when applying "permissions" and not "sudo"
+    #- permissions
+    #- suid
+    - sudo
+  # Do not do this in the GitHub Action Runner
+  when: not is_github_actions
+- name: /etc/sudoers.d/
+  tags:
+    - permissions
+    - sudo
+  become: true
+  block:
+    - name: Find files in /etc/sudoers.d/
+      ansible.builtin.find:
+        paths: /etc/sudoers.d
+        file_type: file
+        recurse: false
+      register: sudoers_files
+    - name: Adjust permissions of files under /etc/sudoers.d/
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: root
+        group: root
+        mode: g-w,o-rwx
+      loop: "{{ sudoers_files.files }}"
+      when: sudoers_files.matched > 0

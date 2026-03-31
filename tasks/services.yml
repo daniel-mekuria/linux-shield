@@ -1,0 +1,277 @@
+---
+# Unwanted services
+# ANSSI-BP-028 R62 - Disabling the non-necessary services
+- name: Stop & disable unwanted services (Debian)
+  become: true
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali"
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  with_items: "{{ debian_services }}"
+  failed_when:
+    - result.failed == true
+    - '"Could not find the requested service" not in result.msg'
+  register: result
+  tags:
+    - services
+    - debian
+
+- name: Slackware services
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"
+  tags:
+    - services
+    - slackware
+  block:
+    - name: Stop unwanted services (Slackware)
+      ansible.builtin.command: /bin/sh /etc/rc.d/rc.{{ item }} stop
+      with_items: "{{ slackware_services }}"
+      register: result
+      # These init scripts behave quite different from each other (e.g. how the
+      # services are stopped/killed), so it's unpractical to try to catch all
+      # the different each and every error message and return codes.
+      failed_when: false
+      changed_when:
+        - result.rc == 0
+        - "'No such file or directory' not in result.stderr"
+    - name: Disable unwanted services (Slackware)
+      ansible.builtin.file:
+        path: "/etc/rc.d/rc.{{ item }}"
+        owner: root
+        group: root
+        mode: ugo-x
+      with_items: "{{ slackware_services }}"
+      register: result
+      failed_when:
+        - result.failed == true
+        - result.state != "absent"
+
+# Cron
+# CIS Debian Linux 10 Benchmark v1.0.0 - 5.1.8 Ensure at/cron is restricted to authorized users
+# Install cron for the Molecule Docker container
+- name: Install cron
+  become: true
+  when:
+    - ansible_facts['distribution'] == "Debian"
+    - '"molecule-notest" in ansible_skip_tags'
+  ansible.builtin.apt:
+    name: cron
+    update_cache: true
+  tags:
+    - packages
+    - debian
+- name: Check if cron is installed (Debian)
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+  tags:
+    - debian
+    - check
+    - cron
+    - authorization
+    - services
+  ansible.builtin.package_facts:
+    manager: auto
+- name: Debian cron
+  become: true
+  when:
+    - ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+    - '"cron" in ansible_facts.packages'
+  tags:
+    - services
+    - configuration
+    - debian
+    - authorization
+    - cron
+  block:
+    - name: Restrict cron 1/2 (create /etc/cron.allow)
+      ansible.builtin.file:
+        path: /etc/cron.allow
+        state: touch
+        owner: root
+        # This group does not exist if package "cron" is not installed
+        group: crontab
+        mode: '0640'
+        access_time: preserve
+        modification_time: preserve
+    - name: Restrict cron 2/2 (remove /etc/cron.deny)
+      ansible.builtin.file:
+        path: /etc/cron.deny
+        state: absent
+
+- name: Create empty /etc/at.allow (whitelist) and remove /etc/at.deny (blacklist)
+  become: true
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Slackware" or ansible_facts['distribution'] == "Ubuntu"
+  tags:
+    - services
+    - configuration
+    - authorization
+    - cron
+  block:
+    - name: Restrict at 1/2 (create /etc/at.allow)
+      become: true
+      ansible.builtin.file:
+        path: /etc/at.allow
+        state: touch
+        owner: root
+        group: daemon
+        mode: '0640'
+        access_time: preserve
+        modification_time: preserve
+    - name: Restrict at 2/2 (remove /etc/at.deny)
+      ansible.builtin.file:
+        path: /etc/at.deny
+        state: absent
+
+- name: Create a job that checks systemd's state
+  become: true
+  when:
+    - ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+    - '"cron" in ansible_facts.packages'
+  ansible.builtin.cron:
+    name: "Check SystemState"
+    job: "/bin/systemctl show --property=SystemState | /bin/grep -v '^SystemState=running$'"
+    minute: "*/5"
+    state: present
+  tags: debian
+
+- name: Slackware's cron
+  tags:
+    - slackware
+    - cron
+  when: ansible_facts['distribution'] == "Slackware"
+  become: true
+  block:
+    - name: Increase crond's log level (Slackware)
+      ansible.builtin.replace:
+        path: /etc/default/crond
+        regexp: '^(CROND_OPTS=".*)-l [a-z]+(.*")$'
+        replace: '\g<1>-l info\g<2>'
+        validate: '/bin/grep "^CROND_OPTS=\".*-l info.*\"$" %s'
+      tags:
+        - services
+        - logging
+        - configuration
+    # From dcron's README
+    - name: Restrict cron from users not beloning to the wheel group (Slackware)
+      ansible.builtin.file:
+        path: /usr/bin/crontab
+        group: wheel
+        mode: '4710'
+      tags:
+        - permissions
+        - services
+        - authorization
+    - name: Set permissions for /var/spool/cron
+      ansible.builtin.file:
+        path: /var/spool/cron
+        owner: root
+        group: root
+        mode: '0700'
+      tags:
+        - permissions
+        - services
+    - name: Set permissions for /var/spool/cron/crontabs
+      ansible.builtin.file:
+        path: /var/spool/cron/crontabs
+        owner: root
+        group: root
+        mode: '0700'
+      tags:
+        - permissions
+        - services
+    # user needs to have x perms into the directory where the temp file is created
+    # Slackware 14.2 has /var/spool/cron as TMPDIR and 14.2+ has /run/cron
+    - name: Fix /run/cron permissions in /etc/rc.d/rc.crond
+      ansible.builtin.blockinfile:
+        path: /etc/rc.d/rc.crond
+        insertafter: "^ {4}mkdir -p /run/cron$"
+        block: |
+          /bin/chgrp wheel /run/cron
+          /bin/chmod 0710 /run/cron
+      tags: services
+    # From dcron's README
+    - name: chmod /usr/sbin/crond (Slackware)
+      ansible.builtin.file:
+        path: /usr/sbin/crond
+        mode: '0700'
+      tags:
+        - permissions
+        - services
+# </Cron>
+
+- name: SSH
+  ansible.builtin.import_tasks: services-ssh.yml
+
+# Misc
+#- name: Install icmpinfo
+#  become: true
+#  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali"
+#  ansible.builtin.apt:
+#    name: icmpinfo
+#    update_cache: true
+#  tags:
+#  - packages
+- name: Install icmpinfo (Slackware)
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"
+  community.general.slackpkg:
+    name: icmpinfo
+    state: present
+    update_cache: true
+  tags:
+    - packages
+    - services
+    - slackware
+
+- name: Slackware rc.d
+  tags: slackware
+  when: ansible_facts['distribution'] == "Slackware"
+  become: true
+  block:
+    - name: Create /etc/rc.d/rc.local (Slackware)
+      ansible.builtin.copy:
+        src: rc.d/rc.local.new
+        dest: /etc/rc.d/rc.local
+        owner: root
+        group: root
+        mode: '0700'
+      tags: services
+    - name: Create /etc/rc.d/rc.local_shutdown symlink (Slackware)
+      ansible.builtin.file:
+        src: /etc/rc.d/rc.local
+        dest: /etc/rc.d/rc.local_shutdown
+        owner: root
+        group: root
+        state: link
+      tags: services
+    - name: Enable smartd (Slackware)
+      ansible.builtin.file:
+        path: /etc/rc.d/rc.smartd
+        owner: root
+        group: root
+        mode: '0700'
+      register: result
+      failed_when:
+        - result.failed == true
+        - result.state != "absent"
+      tags: services
+    #- name: NFSv4 support in rc.inet2
+    #  ansible.builtin.blockinfile:
+    #    path: /etc/rc.d/rc.inet2
+    #    insertbefore: "^# If /etc/rc.d/rc.rpc is executable, run it to load rpc.portmap, rpc.lockd,$"
+    #    block: |
+    #      # Mount remote (NFSv4) filesystems:
+    #      if cat /etc/fstab | grep -v '^#' | grep -w nfs4 1> /dev/null 2> /dev/null ; then
+    #        # Check if we have Kerberos keytab
+    #        if [ -f /etc/krb5.keytab -a -x /usr/sbin/rpc.gssd ]
+    #        then
+    #          if ! ps axc | grep -q rpc.gssd ; then
+    #            echo "Starting RPCSEC_GSS daemon:  /usr/sbin/rpc.gssd"
+    #            /usr/sbin/rpc.gssd
+    #          fi
+    #        fi
+    #        echo "Mounting remote (NFSv4) file systems:  /sbin/mount -a -t nfs4"
+    #        /sbin/mount -a -t nfs4
+    #        /sbin/mount -v -t nfs4
+    #      fi
+    #  tags: services

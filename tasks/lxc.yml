@@ -1,0 +1,245 @@
+---
+
+- hosts: localhost
+  vars:
+    containers:
+      debian: stretch
+      slackware: current
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Create the containers
+      lxc_container:
+        ansible.builtin.template: "{{ item.key }}"
+        name: "harden.sh-test-{{ item.key }}"
+        state: started
+        container_config:
+          - lxc.network.type=veth
+          - lxc.network.link=lxcbr0
+          - lxc.network.flags=up
+        template_options: --release {{ item.value }}
+      with_dict: "{{ containers }}"
+      register: containers_info
+    # Slackware
+    - name: Prepare the Slackware container
+      lxc_container:
+        name: harden.sh-test-slackware
+        container_command: "{{ item }}"
+      with_items:
+        - /bin/sed -i 's/^\(USE_DHCP\[0\]=\).*$/\1"yes"/' /etc/rc.d/rc.inet1.conf
+        - /bin/sh /etc/rc.d/rc.inet1 start
+        - useradd -m -G {{ allowed_group }},wheel slackware
+        - echo "slackware:slackware" | chpasswd
+        - yes | slackpkg -batch=on -default_answer=y update
+        - slackpkg -batch=on -default_answer=y install python
+        - slackpkg -batch=on -default_answer=y install sudo
+        - slackpkg -batch=on -default_answer=y install ca-certificates
+        - slackpkg -batch=on -default_answer=y install perl
+        - 'echo "slackware ALL=(root) EXEC: ALL" 1>/etc/sudoers.d/letmein'
+    - name: Wait for the network to be setup in the containers
+      when: containers_info is changed
+      pause: seconds=10
+    - name: Get containers info now that IPs are available
+      lxc_container:
+        name: "harden.sh-test-{{ item.key }}"
+      with_dict: "{{ containers }}"
+      register: containers_info
+    # Debian
+    - name: Prepare the Debian container
+      lxc_container:
+        name: harden.sh-test-debian
+        container_command: "{{ item }}"
+      with_items:
+        - useradd -m -G {{ allowed_group }},sudo debian
+        - echo "debian:debian" | chpasswd
+        - apt-get -y install python sudo lsb-release
+        - /usr/bin/ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N ''
+    - name: Register the hosts in the inventory
+      add_host:
+        name: "{{ item.lxc_container.ips.0 }}"
+        group: "{{ item.lxc_container.name }}"
+      with_items: "{{ containers_info.results }}"
+
+- hosts: harden.sh-test-debian
+  vars:
+    ansible_ssh_user: debian
+    ansible_ssh_pass: debian
+    ansible_sudo_pass: debian
+    ansible_become_method: sudo
+  vars_files:
+    - vars.yml
+  tasks:
+    - include: lynis.yml
+    - name: Disable non-applicable tests in Lynis
+      become: true
+      ansible.builtin.blockinfile:
+        path: /etc/lynis/default.prf
+        insertafter: "^# Skip a test"
+        block: |
+          skip-test=FILE-6310
+    - name: Run Lynis
+      become: true
+      ansible.builtin.command: /usr/sbin/lynis -Q -q
+    - name: Get Lynis score
+      become: true
+      ansible.builtin.command: 'sed -n "s/^.*Hardening index : \[\([0-9]\+\)\].*$/\1/p" /var/log/lynis.log'
+      args:
+        warn: false
+      register: lynis_score_before
+    - name: Lynis score before hardening
+      ansible.builtin.debug:
+        msg: "{{ lynis_score_before.stdout }}"
+    - include: filesystem.yml
+    - include: ca-certs.yml
+    - include: debian_packages.yml
+    - include: login_defs.yml
+    - include: pam.yml
+    - include: services.yml
+    - include: sysctl.yml
+    - include: sysstat.yml
+    - include: apparmor.yml
+    - include: logging.yml
+    - include: misc.yml
+    - include: banners.yml
+    - include: network.yml
+    - include: sudoers.yml
+    - name: Run Lynis (again)
+      become: true
+      ansible.builtin.command: /usr/sbin/lynis -Q -q
+    - name: Get Lynis score
+      become: true
+      ansible.builtin.command: 'sed -n "s/^.*Hardening index : \[\([0-9]\+\)\].*$/\1/p" /var/log/lynis.log'
+      args:
+        warn: false
+      register: lynis_score_after
+    - name: Lynis score
+      ansible.builtin.debug:
+        msg: "before={{ lynis_score_before.stdout }} after={{ lynis_score_after.stdout }} change={{ lynis_score_after.stdout|int - lynis_score_before.stdout|int }}"
+    - name: Check that the file modifications worked
+      become: true
+      ansible.builtin.shell: 'echo "{{ item.value }}  {{ item.key }}" | sha512sum -c'
+      with_dict:
+        /etc/login.defs: 457d44d224f3435851b92af6ebb9b191dbe8157691f36dba7145443b3b5f455158831fedb89c09fdcad41ff380394bb778f0d07c665d712354aa3f5e6690e9c6
+        /etc/security/access.conf: fd2af9ee053665e242ca93f98d18923e0ec501d4f7d8bf35a808722c65d2af2d8220c0335f011b2aeccd323ea1278ec134e7a3ab2dc099a616c38dc063419008
+        /etc/security/limits.conf: c8275833ce41a485b1186c23f7203ed52b19f5c076dd01ef20bf40622d192d1eea0609b1164cc3258d340e0748d91606edf07f4b343e1a95765546e0c7813280
+        /etc/cron.allow: cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e
+        /etc/pam.d/other: c15fa34ee8bcea3c49fb1ffe0be01d4fe645aed9c498f65a6bc815a6b0ea911ed4d15727e34f93323b113905365565e304e2e608dd9a52663a90443598fb8a0c
+        /etc/pam.d/common-auth: f09aed7f908e67abe35a17c4e7a61743b2d6cb289f3e1baed604cad7a524e9709accb25ff663c1f700c230eccab392b6f6f1a892a8f5c715ec6260bbf5f4c9c2
+        /etc/pam.d/common-account: 184ff797955fa341980d26c309c785867ffce7d535ab5fd5e184e1e53263f097481e3b1da3fc7e30958c36344cb52da3ac1b352746d94693b3dce8c93f65f2c9
+        /etc/pam.d/su: e597844534e3e5979e2b3b97f1f3cf04386390946b49ce3d7daf00273a03d9a708e07c96c78c8d0e5c2df58cd11681fd3a9ada7e2d029e621d8d1ec1490aabbd
+        /etc/security/namespace.conf: 60965288f4ed4406cd89bf0c65c78a601dc7a604aaf11eafd58a5297a221913260bf9ad2dc9f58ff2ef10b90205fd2c3cfc20c0bc8f1df16744a1afa89bbf94e
+        /etc/hosts.allow: 65c9832595051d0b96b3c7282ae2a2e08a593f7be34fa02c34fa7cf850ca15a3b9313f88fe6b34b746dc7d41974e638790f98db300920ff80aaba0809e6a65bc
+        /etc/hosts.deny: 5a2aba03254a150de369afbbbb477af808c49bc7f15ad6a30f4f49c1dd4394a30f10c31f19ea108af8e1bf2f21862ea4ec95a439f4cd4a4af2edf24702b65b3e
+        /etc/sudoers: 1fdaaac7cdd71c959ef4f6b395d002782cf78887816e7384a4fb36b064c99c133e79fd45e97a0f832044f5e7db860bd0ef52149ac04a6c6706df0f862bca4537
+
+- hosts: harden.sh-test-slackware
+  vars:
+    ansible_ssh_user: slackware
+    ansible_ssh_pass: slackware
+    ansible_sudo_pass: slackware
+    ansible_become_method: sudo
+    lynis_version: "2.7.5"
+  vars_files:
+    - vars.yml
+  tasks:
+    - include: ca-certs.yml
+    - name: Download Lynis
+      become: true
+      ansible.builtin.get_url:
+        url: https://downloads.cisofy.com/lynis/lynis-{{ lynis_version }}.tar.gz
+        dest: /root/lynis-{{ lynis_version }}.tar.gz
+        checksum: sha256:3d27ade73a5c1248925ad9c060024940ce5d2029f40aaa901f43314888fe324d
+    - name: Extract Lynis
+      become: true
+      unarchive:
+        remote_src: true
+        src: /root/lynis-{{ lynis_version }}.tar.gz
+        dest: /root
+    - name: Disable non-applicable tests in Lynis
+      become: true
+      ansible.builtin.blockinfile:
+        path: /root/lynis/default.prf
+        insertafter: "^# Skip a test"
+        block: |
+          skip-test=AUTH-9262
+          skip-test=AUTH-9264
+          skip-test=AUTH-9266
+          skip-test=AUTH-9268
+          skip-test=AUTH-9278
+          skip-test=PKGS-7398
+          skip-test=PKGS-7308
+          skip-test=FILE-6310
+    - name: Run Lynis
+      become: true
+      ansible.builtin.command: ./lynis -Q -q
+      args:
+        chdir: /root/lynis
+    - name: Get Lynis score
+      become: true
+      ansible.builtin.command: 'sed -n "s/^.*Hardening index : \[\([0-9]\+\)\].*$/\1/p" /var/log/lynis.log'
+      args:
+        warn: false
+      register: lynis_score_before
+    - name: Lynis score before hardening
+      ansible.builtin.debug:
+        msg: "{{ lynis_score_before.stdout }}"
+    - include: sudoers.yml
+    # Remove the sudoers entry made during preparation so we'll see whether our stricter sudoers works
+    - name: Remove /etc/sudoers.d/letmein
+      ansible.builtin.file:
+        path: /etc/sudoers.d/letmein
+        state: absent
+      become: true
+    - include: filesystem.yml
+    - include: login_defs.yml
+    - include: services.yml
+    - include: sysctl.yml
+    - include: sysstat.yml
+    - include: apparmor.yml
+    - include: logging.yml
+    - include: misc.yml
+    - include: banners.yml
+    - include: network.yml
+    - include: entropy.yml
+    - name: Run Lynis (again)
+      become: true
+      ansible.builtin.command: ./lynis -Q -q
+      args:
+        chdir: /root/lynis
+    - name: Get Lynis score
+      become: true
+      ansible.builtin.command: 'sed -n "s/^.*Hardening index : \[\([0-9]\+\)\].*$/\1/p" /var/log/lynis.log'
+      args:
+        warn: false
+      register: lynis_score_after
+    - name: Lynis score
+      ansible.builtin.debug:
+        msg: "before={{ lynis_score_before.stdout }} after={{ lynis_score_after.stdout }} change={{ lynis_score_after.stdout|int - lynis_score_before.stdout|int }}"
+    - name: Check that the file modifications worked
+      become: true
+      ansible.builtin.shell: 'echo "{{ item.value }}  {{ item.key }}" | sha512sum -c'
+      with_dict:
+        /usr/sbin/adduser: 9dbe4b4c329139bdad8907964dd7d2632dce3fa809b5a0e96539b85c633d4f09fddbd75f2072943e58e9ca9c7de6da44d0456b036ddfc0b983ae822a0d8c42bb
+        /sbin/installpkg: db2804e1e5d826f914be9b3419b5d0ac7bd4e22b65093b8b2fb138a69d8afa95d274d37f48c9e71df168ce12adc1b217f212ea54fb4127a0a4947208b635d127
+        /etc/inittab: 28afc334dcaf4f6c5210568a2ccb2f5809a94bf16b2feba6763ea054827f383f23d5b76420e901376e29eb37e1b6af6b5ffaea0001effd1df4afeff34c9564d7
+        /etc/login.defs: 2e64ef9d8576ecb4f09ac10f018ec14c6cf793329ef9fbf3a5b9034b8d62ca300076ae79346d3acb27ec017b5f3ff04d28b4545c163d095a853e556ceb76c40a
+        /etc/shutdown.allow: cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e
+        /etc/logrotate.conf: 1473ea62407ca03336801d72c2b2fccadcba6d4fd5356cc47f53590038bca5da342aed8cee78053f8215a4c3cd40ccf1c6f0446bb7e4a5755eda457ba32413bc
+        /etc/cron.d/sysstat: 2a963c51e42d738ff87ae4f62d10f199db6774b6ebeecf21e2fa2955804678245092bc64e2bfb0738f9ac488c64dcd93a0a62ead3119a367f666a6713ece0565
+        /etc/profile: 574444e4031223b6939d9bad846a7039bd72b3db027aec3907f35770d7772f9dfad2e12ad517aee7a9700132425715804bbfb6c2233bb13247d31969b7b6d633
+        /etc/login.access: faa10889bdf4fa4633bf8ad96b515fcee393bc4518fad53a8678574c66dc39041ab4ee69cd4286060916778db8904c8ff46a14780777835444e537ffb347c7f3
+        /etc/securetty: 59c89246507c3c6f61ed61ddb2558bb020ce23e5f4b8083b28c2bba487bd3c79382634fa5d936c08808a6558ac03e59fa09e29b578e7f8b5f1c0c1fef5564bdc
+        /etc/hosts.allow: 65c9832595051d0b96b3c7282ae2a2e08a593f7be34fa02c34fa7cf850ca15a3b9313f88fe6b34b746dc7d41974e638790f98db300920ff80aaba0809e6a65bc
+        /etc/hosts.deny: 5a2aba03254a150de369afbbbb477af808c49bc7f15ad6a30f4f49c1dd4394a30f10c31f19ea108af8e1bf2f21862ea4ec95a439f4cd4a4af2edf24702b65b3e
+        /var/log/faillog: 5e1a82950562975d813b6a5b60eee8bf3a6b266e885f3aadbb272508c7b8f3f31d44fc78700204e1e99cfeda211ca0b8c77f4c02962d92935063535ee1b308c3
+        /etc/default/crond: 56adcdd4d2dd1ebb04ad764229618b69d8cb76a78811b82b3bc442b222a010501f955e8aea6334cadcb30aa40f1cd7c01d44b3c05efb73f6cf18be3f95e19049
+        /etc/default/useradd: b77926ee8c445b5cc2bb35b3fb4ac56fbba250180b9fd7d43b5cbb219f8f78c4cbbeb350608b5e09717954ca8e66ec729fc038a046bf5e15804f23d1a9435690
+        /etc/rc.d/rc.M: 3709942becb15d7d5436edb6f7e23027bbf8cd4025a7d3a91956d62bfe6fbe7614f8662fbb432fee365f3412b85d370395464c3f9404fa4ddaa2dd0098354576
+        /etc/rc.d/rc.K: d7d4f904cdd26dd2a18b2a5c5e60b3a2c2a3f7dd703b92269ab1208aa791078332373cf3e9c987bc0dec09e53e49ebf0fc3733ea71fc9a542c26a5b40fb6c90f
+        /etc/rc.d/rc.S: 1dc1c6a09b398653e82a92864b884f0e95375a1aad5b10bcc3c046ff6d3bfc96315892942507927b5b6154afe64e6f255ba06e301c038dcdd1250eb3c302b784
+        #/etc/rc.d/rc.inet2: d690fc6d10b6766984d2042e63661d63c1575eda4fb7cd09a4c1a0264d4fe965c8a3e07fbf69735506e8eb167d070fca86c46d78e72b53df6b81486891f48c38
+        /etc/logrotate.d/syslog: a3d706dd7a94b1f58d362d9222b0d473c6c6d6d1d166813bc57a0f523cfe67792ee75dfd09e6e07a28794fcecf76dcdfeb5a96992c4ae324f118a21630de1126
+        /etc/sudoers: 7428f2a901a7662a2b971aa9b8961f0e4a542a3dfee934e2f04115b5a46b3ed5b444ebc17c6753764109c36e6d0fcf2279369aaa8a2a122cca4d1139c52180b7
+        /etc/rc.d/rc.crond: a59f3240c4c4dce121376050fb5cc9b037fdf9de73f605e2c1bc3c9b1e4dc11467313b474f81adfc619d7f8c42198913c43b74dbe44c37f5eb31f086e79c98e1
+        /etc/ssh/sshd_config: 4bc1251ca48c2f6ef34c3b15eec1ba7b93aacabe91b9e63f20ee4b77d7b46671718fe15626cb9267825b206f0b74a31c0a899e7394599a50da13eedf99f9a885
+        /etc/ssh/ssh_config: a60ae81e12242b2686e9b6b9a03b1777958aa5cd099bada447297be7bcf4b0b329c5dddd216a67f70947a116ac7cafe509e9ed6736b277fd87f87ef95d68a7d7

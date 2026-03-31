@@ -1,0 +1,49 @@
+# /etc/cgrules.conf
+#The format of this file is described in cgrules.conf(5)
+#manual page.
+root:/usr/sbin/crond		net_cls	daemons/crond/
+root:/usr/sbin/syslogd		net_cls	daemons/syslogd/
+root:/sbin/haveged		net_cls	daemons/haveged/
+root:/usr/sbin/smartd		net_cls	daemons/smartd/
+root:/usr/sbin/acpid		net_cls	daemons/acpid/
+root:/usr/sbin/NetworkManager	net_cls	daemons/NetworkManager/
+messagebus:/usr/bin/dbus-daemon	net_cls	daemons/dbus-daemon/
+root:/sbin/udevd		net_cls	daemons/udevd/
+ntp:/usr/sbin/ntpd		net_cls	daemons/ntpd/
+*:/usr/sbin/httpd		net_cls	daemons/httpd/
+root:/usr/sbin/sshd		net_cls	daemons/sshd/
+root:/usr/sbin/postfix		net_cls	daemons/postfix/
+root:/usr/libexec/postfix/master	net_cls	daemons/postfix/
+postfix				net_cls	daemons/postfix/
+root:/usr/sbin/krb5kdc		net_cls	daemons/krb5/
+root:/usr/sbin/kadmind		net_cls	daemons/krb5/
+root:/sbin/auditd		net_cls	daemons/auditd/
+root:/sbin/audisp-remote	net_cls	daemons/auditd/
+clamav:/usr/sbin/clamd		net_cls	daemons/clamav/
+clamav:/usr/bin/freshclam	net_cls	daemons/clamav/
+ldap:/usr/libexec/slapd		net_cls daemons/openldap/
+opendkim:/usr/sbin/opendkim	net_cls daemons/opendkim/
+nagios				net_cls daemons/nagios/
+root:/usr/sbin/collectd		net_cls daemons/collectd/
+root:/usr/sbin/arpwatch		net_cls daemons/arpwatch/
+root:/usr/sbin/icmpinfo		net_cls daemons/icmpinfo/
+root:/sbin/mdadm		net_cls daemons/mdadm/
+root:/usr/sbin/rpc.gssd		net_cls daemons/rpc-gssd/
+rpc:/sbin/rpcbind		net_cls daemons/rpc/
+rpc:/sbin/rpc.statd		net_cls daemons/rpc/
+root:/usr/sbin/usbguard-daemon	net_cls daemons/usbguard/
+root:/usr/sbin/pcscd		net_cls daemons/pcscd/
+root:/usr/sbin/automount	net_cls daemons/autofs/
+root:/usr/bin/snort		net_cls daemons/snort/
+polkitd:/usr/lib/polkit-1/polkitd	net_cls daemons/polkitd/
+root:/usr/bin/dockerd		net_cls daemons/dockerd/
+root:/usr/bin/containerd	net_cls daemons/dockerd/
+amavis				net_cls daemons/amavisd/
+dovecot				net_cls daemons/dovecot/
+dovenull			net_cls daemons/dovecot/
+root:/usr/sbin/dovecot		net_cls daemons/dovecot/
+opendmarc:/usr/sbin/opendmarc	net_cls daemons/opendmarc/
+*:/usr/sbin/oidentd		net_cls daemons/oidentd/
+icecc				net_cls daemons/icecream/
+@users				cpu,cpuacct,net_cls	users/%u
+# End of file

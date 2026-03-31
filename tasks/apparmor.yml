@@ -1,0 +1,163 @@
+---
+# ANSSI-BP-028 R37 - Using Mandatory Access Control features
+# ANSSI-BP-028 R45 - Activating AppArmor security profiles
+- name: Install AppArmor
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+  become: true
+  ansible.builtin.apt:
+    name: ['apparmor', 'apparmor-profiles', 'apparmor-utils']
+    update_cache: true
+  tags:
+    - packages
+# https://github.com/raspberrypi/linux/pull/1698
+- name: Add lsm=apparmor to /boot/firmware/cmdline.txt (Raspberry Pi OS)
+  ansible.builtin.replace:
+    path: /boot/firmware/cmdline.txt
+    # https://stackoverflow.com/a/61974725
+    regexp: '^(.(?!.*\blsm=apparmor\b).*)$'
+    replace: '\1 lsm=apparmor'
+  become: true
+  when: ansible_facts['distribution'] == "Debian"
+  tags: configuration
+  register: result
+  failed_when:
+    - result.failed == true
+    - '"does not exist !" not in result.msg'
+- name: Enable AppArmor in /etc/default/grub
+  become: true
+  ansible.builtin.replace:
+    path: /etc/default/grub
+    regexp: '^(GRUB_CMDLINE_LINUX="(?!.*\b{{ item }}\b).*)"$'
+    replace: '\1 {{ item }}"'
+    backup: true
+  with_items:
+    - apparmor=1
+    - security=apparmor
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+  tags:
+    - configuration
+    - apparmor
+  notify: "Run update-grub"
+  register: result
+  failed_when:
+    - result.failed == true
+    - '"does not exist !" not in result.msg'
+# https://github.com/pyllyukko/harden.yml/wiki/AppArmor
+- name: Enable extra profiles
+  vars:
+    apparmor_profiles:
+      - usr.lib.firefox.mozilla-xremote-client
+      #- etc.cron.daily.logrotate
+      - etc.cron.daily.slocate.cron
+      - etc.cron.daily.tmpwatch
+      - sbin.dhclient-script
+      - sbin.dhcpcd
+      - usr.bin.passwd
+      - usr.bin.wireshark
+      - usr.sbin.dhcpd
+      #- usr.sbin.sshd
+      - usr.sbin.useradd
+      - usr.sbin.userdel
+      - postfix-anvil
+      - postfix-bounce
+      - postfix-cleanup
+      - postfix-discard
+      - postfix-dnsblog
+      - postfix-error
+      - postfix-flush
+      - postfix-lmtp
+      - postfix-local
+      - postfix-master
+      - postfix-nqmgr
+      - postfix-oqmgr
+      - postfix-pickup
+      - postfix-pipe
+      - postfix-postscreen
+      - postfix-proxymap
+      - postfix-qmgr
+      - postfix-qmqpd
+      - postfix-scache
+      - postfix-showq
+      - postfix-smtp
+      - postfix-smtpd
+      - postfix-spawn
+      - postfix-tlsmgr
+      - postfix-trivial-rewrite
+      - postfix-verify
+      - postfix-virtual
+      - usr.bin.procmail
+      - usr.sbin.postalias
+      - usr.sbin.postdrop
+      - usr.sbin.postmap
+      - usr.sbin.postqueue
+      - usr.lib.dovecot.dovecot-lda
+  become: true
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali"
+  block:
+    - name: Copy extra profiles
+      ansible.builtin.copy:
+        src: /usr/share/apparmor/extra-profiles/{{ item }}
+        dest: /etc/apparmor.d/{{ item }}
+        owner: root
+        group: root
+        mode: '0600'
+        remote_src: true
+      with_items: '{{ apparmor_profiles }}'
+    - name: Get AppArmor status
+      ansible.builtin.command: /usr/bin/aa-enabled
+      tags: check
+      register: aastatus
+      changed_when: false
+      failed_when: false
+    - name: Enable extra profiles
+      ansible.builtin.command: /usr/sbin/aa-enforce /etc/apparmor.d/{{ item }}
+      with_items: '{{ apparmor_profiles }}'
+      tags: configuration
+      register: result
+      changed_when: result.stdout is search('^Setting .+ to enforce mode\.$')
+      when: aastatus.rc == 0
+    - name: Fix Postfix profiles
+      ansible.builtin.replace:
+        path: /etc/apparmor.d/{{ item }}
+        regexp: '/usr/lib/postfix/'
+        replace: '/usr/lib{,exec}/postfix/'
+      with_items:
+        - postfix-anvil
+        - postfix-bounce
+        - postfix-cleanup
+        - postfix-discard
+        - postfix-dnsblog
+        - postfix-error
+        - postfix-flush
+        - postfix-lmtp
+        - postfix-local
+        - postfix-master
+        - postfix-nqmgr
+        - postfix-oqmgr
+        - postfix-pickup
+        - postfix-pipe
+        - postfix-postscreen
+        - postfix-proxymap
+        - postfix-qmgr
+        - postfix-qmqpd
+        - postfix-scache
+        - postfix-showq
+        - postfix-smtp
+        - postfix-smtpd
+        - postfix-spawn
+        - postfix-tlsmgr
+        - postfix-trivial-rewrite
+        - postfix-verify
+        - postfix-virtual
+        - usr.lib.dovecot.dovecot-lda
+        - usr.sbin.postqueue
+    - name: 'AppArmor: Copy local override for passwd'
+      tags:
+        - passwords
+        - pam
+      ansible.builtin.copy:
+        src: apparmor/usr.bin.passwd
+        dest: /etc/apparmor.d/local/usr.bin.passwd
+        owner: root
+        group: root
+        mode: '0600'

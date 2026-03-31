@@ -1,0 +1,256 @@
+---
+# https://www.debian.org/doc/manuals/securing-debian-manual/ch04s11.en.html#idm1318
+# Regarding SHA_CRYPT_MIN_ROUNDS: https://github.com/linux-pam/linux-pam/issues/352
+# ANSSI-BP-028 R36 - Changing the default value of UMASK
+- name: Configure shadow password suite (generic)
+  become: true
+  ansible.builtin.replace:
+    path: /etc/login.defs
+    regexp: '^(# ?)?({{ item.key }}\s+)[^\s]+$'
+    replace: '\g<2>{{ item.value }}'
+    validate: '/bin/grep "^{{ item.key }}\s\+{{ item.value }}$" %s'
+  with_dict: "{{ defs_common }}"
+  vars:
+    defs_common:
+      LOG_OK_LOGINS: "yes"
+      UMASK: "077"
+      SULOG_FILE: "/var/log/sulog"
+      CHFN_RESTRICT: "rwh"
+      DEFAULT_HOME: "no"
+      CREATE_HOME: "yes"
+      HOME_MODE: "0700"
+      LOGIN_RETRIES: "{{ max_auth_tries }}"
+      LOG_UNKFAIL_ENAB: "yes"
+      SYSLOG_SU_ENAB: "yes"
+      SYSLOG_SG_ENAB: "yes"
+  tags:
+    - configuration
+    - logging
+    - umask
+# This is separated so you can run "ansible-playbook --tags passwords"
+# AUTH-9286
+# https://www.redhat.com/sysadmin/more-lockdown-controls:
+#   * Minimum password lifetime
+#   * Maximum password lifetime
+#   * Failed login delay
+# CIS Debian Linux 10 Benchmark v1.0.0:
+#   5.4.1.1 Ensure password expiration is 365 days or less
+#   5.4.1.2 Ensure minimum days between password changes is configured
+#   5.4.1.3 Ensure password expiration warning days is 7 or more
+# ANSSI-BP-028 R68 - Protecting the stored passwords
+- name: Configure shadow password suite (password related)
+  become: true
+  ansible.builtin.replace:
+    path: /etc/login.defs
+    regexp: '^(# ?)?({{ item.key }}\s+)[^\s]+$'
+    replace: '\g<2>{{ item.value }}'
+    validate: '/bin/grep "^{{ item.key }}\s\+{{ item.value }}$" %s'
+  with_dict:
+    PASS_MAX_DAYS: "{{ pass_max_days }}"
+    PASS_MIN_DAYS: "{{ pass_min_days }}"
+    PASS_WARN_AGE: "{{ pass_warn_age }}"
+    SHA_CRYPT_MIN_ROUNDS: "{{ crypt_rounds }}"
+    ENCRYPT_METHOD: "{{ 'YESCRYPT' if ansible_facts['distribution'] == 'Debian' else 'SHA512' }}"
+    FAIL_DELAY: "{{ fail_delay }}"
+    PREVENT_NO_AUTH: "yes"
+    YESCRYPT_COST_FACTOR: 11
+  tags:
+    - configuration
+    - passwords
+# Required at least for getent
+- name: Install glibc package (Slackware)
+  when: ansible_facts['distribution'] == "Slackware"
+  become: true
+  community.general.slackpkg:
+    name: glibc
+    state: present
+    update_cache: true
+  tags:
+    - packages
+    - slackware
+# Slackware Linux Benchmark v1.1 - 7.8 Restrict Root Logins To System Console
+# CIS Debian Linux 10 Benchmark v1.0.0 - 5.5 Ensure root login is restricted to system console
+# https://www.debian.org/doc/manuals/securing-debian-manual/restrict-console-login.en.html
+# https://github.com/pyllyukko/harden.yml/issues/47
+- name: Limit the list of terminals from which root can log in (securetty)
+  become: true
+  ansible.builtin.copy:
+    src: securetty.new
+    dest: /etc/securetty
+    owner: root
+    group: root
+    mode: '0400'
+  tags:
+    - configuration
+    - authorization
+
+# profile.d
+- name: Create /etc/profile.d/expiry.sh
+  become: true
+  ansible.builtin.copy:
+    src: profile.d/expiry.sh.new
+    dest: /etc/profile.d/expiry.sh
+    owner: root
+    group: root
+    mode: '0755'
+  tags:
+    - configuration
+    - passwords
+# CIS Debian Linux 10 Benchmark v1.0.0 - 5.4.5 Ensure default user shell timeout is 900 seconds or less
+# Guide to the Secure Configuration of Red Hat Enterprise Linux 5 Revision 4.1 - 2.3.5.5 Implement Inactivity Time-out for Login Shells
+# ANSSI-BP-028 R32 - Configuring a timeout on local user sessions
+- name: Create /etc/profile.d/{tmout.sh,autologout.csh}
+  become: true
+  tags:
+    - configuration
+    - shells
+    - timeout
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/{{ item }}.j2"
+    dest: /etc/profile.d/{{ item }}
+    owner: root
+    group: root
+    mode: '0755'
+  with_items:
+    - tmout.sh
+    - autologout.csh
+# CIS Debian Linux 10 Benchmark v1.0.0 - 5.4.4 Ensure default user umask is 027 or more restrictive
+# Slackware and CentOS have umask in /etc/profile
+# ANSSI-BP-028 R36 - Changing the default value of UMASK
+- name: Debian umask
+  become: true
+  tags:
+    - configuration
+    - debian
+    - umask
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+  block:
+    - name: Create /etc/profile.d/umask.sh (Debian)
+      ansible.builtin.copy:
+        src: profile.d/umask.sh.new
+        dest: /etc/profile.d/umask.sh
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Set umask in /etc/skel/.profile
+      ansible.builtin.replace:
+        path: /etc/skel/.profile
+        regexp: '^#?(umask\s+)\d+$'
+        replace: '\g<1>077'
+        validate: '/bin/grep "^umask 077$" %s'
+- name: Create /etc/profile.d/awk_sandboxing.sh
+  become: true
+  ansible.builtin.copy:
+    src: profile.d/awk_sandboxing.sh
+    dest: /etc/profile.d/awk_sandboxing.sh
+    owner: root
+    group: root
+    mode: '0755'
+  tags: configuration
+# </profile.d>
+
+# Slackware Linux Benchmark v1.1 - 7.3 Create ftpusers Files
+# https://www.debian.org/doc/manuals/securing-debian-manual/ch04s11.en.html#id-1.5.14.12
+- name: ftpusers
+  tags:
+    - configuration
+    - authorization
+    - network
+  block:
+    - name: getent passwd
+      ansible.builtin.getent:
+        database: passwd
+      tags: check
+    - name: Create /etc/ftpusers
+      become: true
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/templates/ftpusers.j2"
+        dest: /etc/ftpusers
+        owner: root
+        group: root
+        mode: '0600'
+
+- name: login_defs Slackware
+  ansible.builtin.import_tasks: login_defs-slackware.yml
+  when: ansible_facts['distribution'] == "Slackware"
+  tags: slackware
+
+- name: Accounts
+  ansible.builtin.import_tasks: accounts.yml
+
+# CIS Debian Linux 10 Benchmark v1.0.0 - 6.2.17 Ensure no duplicate GIDs exist
+# CIS Debian Linux 13 Benchmark v1.0.0 - 7.2.6 Ensure no duplicate GIDs exist
+- name: Verify integrity of group files
+  become: true
+  ansible.builtin.command: grpck -r
+  tags: check
+  changed_when: false
+
+# CIS Debian Linux 10 Benchmark v1.0.0 - 5.4.1.4 Ensure inactive password lock is 30 days or less
+# Debian's "useradd -D -f 30" fails with "cannot create new defaults file"
+- name: Set the number of days after a password expires until the account is permanently disabled (inactive password lock)
+  become: true
+  tags:
+    - passwords
+    - authorization
+    - configuration
+  ansible.builtin.replace:
+    path: /etc/default/useradd
+    regexp: '^(# ?)?(INACTIVE=).*$'
+    replace: '\g<2>{{ inactive_password_lock }}'
+    validate: '/bin/grep "^INACTIVE={{ inactive_password_lock }}$" %s'
+
+- name: Configure /etc/adduser.conf (Debian)
+  become: true
+  ansible.builtin.replace:
+    path: /etc/adduser.conf
+    regexp: '^({{ item.key }}=).*$'
+    replace: '\g<1>{{ item.value }}'
+    validate: '/bin/grep "^{{ item.key }}={{ item.value }}$" %s'
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+  tags:
+    - configuration
+    - debian
+    - accounts
+  with_dict:
+    DIR_MODE: "0700"
+    USERGROUPS: "yes"
+    SYS_DIR_MODE: "0700"
+
+# Unfortunately the hash_rounds_min doesn't seem to work
+#- name: Configure libuser.conf
+#  become: true
+#  when: ansible_facts['os_family'] == "RedHat"
+#  tags:
+#    - centos
+#    - configuration
+#  community.general.ini_file:
+#    path: /etc/libuser.conf
+#    section: defaults
+#    option: "{{ item.key }}"
+#    value: "{{ item.value }}"
+#    owner: root
+#    group: root
+#    mode: '0644'
+#  with_dict:
+#    hash_rounds_min: "{{ crypt_rounds }}"
+#    crypt_style: sha512
+
+# ANSSI-BP-028 R32 - Configuring a timeout on local user sessions
+- name: Configure logind.conf
+  tags:
+    - configuration
+    - timeout
+  become: true
+  community.general.ini_file:
+    path: '{{ logind_conf_location }}'
+    section: Login
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  with_dict:
+    IdleActionSec: '{{ session_timeout }}min'
+    IdleAction: "lock"

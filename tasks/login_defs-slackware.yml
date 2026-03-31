@@ -1,0 +1,92 @@
+---
+- name: /etc/shutdown.allow
+  tags:
+    - configuration
+    - authorization
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"
+  block:
+    - name: Create /etc/shutdown.allow
+      ansible.builtin.copy:
+        content: ""
+        dest: /etc/shutdown.allow
+        force: false
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Use shutdown -a in /etc/inittab
+      tags: inittab
+      ansible.builtin.replace:
+        path: /etc/inittab
+        regexp: '^(ca::ctrlaltdel:/sbin/shutdown -t5 -r now)$'
+        replace: '\g<1> -a'
+        validate: '/bin/grep "^ca::ctrlaltdel:/sbin/shutdown -t5 -r now -a$" %s'
+
+# ANSSI-BP-028 R36 - Changing the default value of UMASK
+- name: Set umask to 077 in /etc/profile (Slackware)
+  tags:
+    - configuration
+    - umask
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"
+  ansible.builtin.replace:
+    path: /etc/profile
+    regexp: '^(umask) [0-9]+$'
+    replace: '\g<1> 077'
+    validate: '/bin/grep "^umask 077$" %s'
+
+# ftp://ftp.slackware.com/pub/slackware/slackware64-current/source/a/shadow/adduser
+# Default AGID is "audio cdrom floppy input lp netdev plugdev power scanner video"
+- name: Configure defchmod and AGID in /usr/sbin/adduser (Slackware)
+  tags: configuration
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"
+  ansible.builtin.replace:
+    path: /usr/sbin/adduser
+    regexp: '^({{ item.key }}=).+'
+    replace: '\g<1>{{ item.value }}'
+    validate: "/bin/grep '^{{ item.key }}={{ item.value }}$' %s"
+  with_dict:
+    defchmod: 700
+    AGID: '"audio input netdev plugdev power video"'
+
+# Slackware Linux Benchmark v1.1 - 7.10 Require Authentication For Single-User Mode
+# https://web.archive.org/web/20070702234716/http://www.bastille-linux.org:80/jay/anyone-with-a-screwdriver.html
+# https://cisofy.com/lynis/controls/AUTH-9308/
+- name: Single user mode authentication
+  tags:
+    - configuration
+    - authentication
+    - inittab
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"
+  block:
+    - name: Remove S from System initialization (Slackware)
+      ansible.builtin.replace:
+        path: /etc/inittab
+        regexp: '^si:S:sysinit:/etc/rc\.d/rc\.S$'
+        replace: 'si::sysinit:/etc/rc.d/rc.S'
+        validate: '/bin/grep "^si::sysinit:/etc/rc.d/rc.S$" %s'
+    - name: Create separate entry for single user mode which requires authentication (Slackware)
+      ansible.builtin.blockinfile:
+        path: /etc/inittab
+        insertafter: "^x1:4:respawn:/etc/rc.d/rc.4$"
+        block: |
+          # single user mode
+          ~~:S:wait:/sbin/sulogin
+    - name: Fix single user mode in rc.K
+      ansible.builtin.lineinfile:
+        path: /etc/rc.d/rc.K
+        regexp: '^/sbin/telinit'
+        line: /sbin/telinit -t 1 S
+
+- name: Add LESS variables and disable core dumps
+  tags: configuration
+  ansible.builtin.blockinfile:
+    path: /etc/profile
+    block: |
+      export LESSSECURE=1
+      export LESSHISTFILE="/dev/null"
+      ulimit -Hc 0
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"

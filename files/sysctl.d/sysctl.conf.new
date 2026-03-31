@@ -1,0 +1,104 @@
+kernel.core_uses_pid = 1
+
+# use address space randomization
+#
+# -plus-
+#
+# Randomizing heap placement makes heap exploits harder, but it
+# also breaks ancient binaries (including anything libc5 based).
+#
+kernel.randomize_va_space = 2
+
+# "Any process which has changed privilege levels or is execute only will not be dumped"
+fs.suid_dumpable = 0
+# "symlinks are permitted to be followed only":
+#   * "when outside a sticky world-writable directory"
+#   * "when the uid of the symlink and follower match"
+#   * "when the directory owner matches the symlink's owner"
+fs.protected_symlinks = 1
+# "hardlinks cannot be created by users if they do not already own the source file, or do not have read/write access to it"
+fs.protected_hardlinks = 1
+# https://www.kernel.org/doc/html/latest/admin-guide/sysctl/fs.html#protected-fifos
+fs.protected_fifos = 2
+# https://www.kernel.org/doc/html/latest/admin-guide/sysctl/fs.html#protected-regular
+fs.protected_regular = 2
+
+# got the idea from:
+# https://secure.wikimedia.org/wikibooks/en/wiki/Grsecurity/Appendix/Grsecurity_and_PaX_Configuration_Options#Larger_entropy_pools
+#kernel.random.poolsize = 8192
+
+# disallow modifying the LDT (Local Descriptor Table)... "can sometimes be abused to exploit some weaknesses of the architecture, opening new vulnerabilities"
+sys.kernel.modify_ldt = 0
+
+# 0 - disable sysrq completely
+# 4 - enable control of keyboard (SAK, unraw)
+#
+# links:
+#   - http://www.debian.org/doc/manuals/securing-debian-howto/ch4.en.html#s-restrict-sysrq
+#   - http://tldp.org/HOWTO/Remote-Serial-Console-HOWTO/security-sysrq.html
+#   - kernel.org/doc/Documentation/sysrq.txt
+#   - en.wikipedia.org/wiki/Magic_SysRq_key
+kernel.sysrq = 4
+
+# see Restrict unprivileged access to the kernel syslog (CONFIG_SECURITY_DMESG_RESTRICT) in kernel
+kernel.dmesg_restrict = 1
+
+# https://www.kernel.org/doc/Documentation/sysctl/kernel.txt
+kernel.kptr_restrict = 2
+kernel.ctrl-alt-del = 0
+
+# TODO: shared_media?!?
+# https://tools.ietf.org/html/rfc1620
+
+# https://www.cert.fi/haavoittuvuudet/2013/haavoittuvuus-2013-071.html
+# https://www.kernel.org/doc/html/v5.7/admin-guide/perf-security.html#perf-events-perf-unprivileged-users
+# https://www.kernel.org/doc/html/v5.7/admin-guide/sysctl/kernel.html#perf-event-paranoid
+# ANSSI-BP-028 R9:
+#   Prohibit unprivileged access to the perf_event_open () system call.
+#   With a value greater than 2, we impose the possession of
+#   CAP_SYS_ADMIN , in order to collect the perf events.
+kernel.perf_event_paranoid = 2
+
+# https://kspp.github.io/Recommended_Settings#sysctls
+# https://www.kernel.org/doc/html/latest/admin-guide/sysctl/kernel.html#kexec-load-disabled
+# Turn off kexec, even if it's built in.
+kernel.kexec_load_disabled = 1
+# https://www.kernel.org/doc/html/latest/admin-guide/sysctl/kernel.html#modules-disabled
+#kernel.modules_disabled = 1
+
+# https://www.kernel.org/doc/Documentation/security/Yama.txt
+# 0 - classic ptrace permissions
+# 1 - restricted ptrace
+# 2 - admin-only attach
+# 3 - no attach
+# Avoid non-ancestor ptrace access to running processes and their credentials.
+# ANSSI-BP-028 R11 - Configuration option of the Yama LSM
+kernel.yama.ptrace_scope = 3
+
+# Disable User Namespaces, as it opens up a large attack surface to unprivileged users.
+# https://www.debian.org/releases/bullseye/amd64/release-notes/ch-information.en.html#linux-user-namespaces
+# https://www.openwall.com/lists/oss-security/2022/01/29/1
+#user.max_user_namespaces = 0
+
+# https://www.kernel.org/doc/html/latest/admin-guide/sysctl/kernel.html#unprivileged-bpf-disabled
+# https://www.debian.org/releases/bullseye/amd64/release-notes/ch-information.en.html#linux-unprivileged-bpf
+kernel.unprivileged_bpf_disabled = 1
+
+# https://lkml.org/lkml/2019/4/15/890
+# https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=7c0cca7c847e6e019d67b7d793efbbe3b947d004
+# https://gitlab.tails.boum.org/tails/tails/-/issues/18302
+dev.tty.ldisc_autoload = 0
+
+# https://www.kernel.org/doc/html/latest/admin-guide/sysctl/kernel.html#panic-on-oops
+# https://en.wikipedia.org/wiki/Linux_kernel_oops
+# ANSSI-BP-028 R9
+#kernel.panic_on_oops=1
+
+# ANSSI-BP-028 R9
+# Restrict the use of the perf subsystem
+kernel.perf_cpu_time_max_percent=1
+kernel.perf_event_max_sample_rate=1
+
+# https://gitlab.com/apparmor/apparmor/-/wikis/Kernel_Feature_Matrix
+# https://www.openwall.com/lists/oss-security/2026/03/28/6
+#kernel.unprivileged_userns_apparmor_policy = 1

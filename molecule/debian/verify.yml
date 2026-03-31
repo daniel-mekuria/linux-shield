@@ -1,0 +1,122 @@
+---
+- name: Verify
+  hosts: molecule-debian
+  tasks:
+    - name: Verify checksums of some of the modified/creates files
+      ansible.builtin.shell: 'set -o pipefail; echo "{{ item.value }}  {{ item.key }}" | sha512sum -c'
+      register: result
+      args:
+        executable: /bin/bash
+      changed_when:
+        - '": OK" not in result.stdout'
+      with_dict:
+        #/etc/pam.d/common-account: f8420cf213beac62bc5875c5268151672cd11d62440f57365ad6d99820146f8d2cf2a58bf4535ca40635801deea301321bb87195ff341d89f6bf7281c2cd8d50
+        #/etc/pam.d/common-auth: 7a722b18319fa38bbb6b5373151271ea9bb174c8fd806037f268e705bb33173100b3576d457ad552e1af9ba341d714a85baa1a8527ea1ae0598a6ee8231e61b2
+        /etc/pam.d/common-password: bd8e26085c22fabb5e0277fb0dcfced17bc404c53781cf3b9b7083da018599c9e98adcee0b07d7b3b30cc834a4b503a0f3681c8b72a2f320e56c5f21628ba320
+        #/etc/pam.d/common-session: 97a2593bef6cc5c7741a5c6098d8d8d604ecab6bb1216fc4606c36f6272655746be5e58fb46172179af0cef12628a85e9be187623476af462ac8f63ba4aee4de
+        #/etc/pam.d/common-session-noninteractive: 9a7e9494eef090ef3dee50222b6435bd6183cf413ce6660df61c1eaca7d29202b0607758d156444ea5d720d442cf2bcdaa9044543d36d9c6e490e7e937e29fea
+        /etc/pam.d/other: c15fa34ee8bcea3c49fb1ffe0be01d4fe645aed9c498f65a6bc815a6b0ea911ed4d15727e34f93323b113905365565e304e2e608dd9a52663a90443598fb8a0c
+        /etc/pam.d/su: f105d2367dfc88b1348e09369085f472c7f5aef9a6ee756d3512cde7f4084b917e150f96997d7e39b7d3ff35f30627618775b0b58bc4658df4da41d36f311460
+        /usr/share/pam-configs/unix: ebf74e9f23666e6ec0f11ff214b24dbd8bd4b74a733c82015eea125b7e70eaa450c7065769a88e01555ae952b3f2a5aa58c297b130793889369657d42a2f5fc5
+        #/etc/security/limits.conf: 299a906992f61894be3ed2a4ef39ea3ad2dc25e76edb40cc915d7b0cf7626bac7d91c19e46031e92ddb2d5acfed6a4cf2bc83506dc6ca64f00bd6dea8524860c
+        /etc/security/namespace.conf: 89512d109d556324b68c7ebc3f01c5f5d6fcc5d1ab8b6fca7a443beba433cadebe3444897285d4d0ae272c056f467c61d9475434e4c8a19c7465aeab75cc4e77
+        /etc/security/faillock.conf: 135e0e8e4c8a35d6306df346ac7efa3c5579d713116f2ea7e97cb980de038494dd7d540fcfe1a151e43f2fece85bf1d128b3b64dccd6c770bd78a454d0eb2d12
+        #/etc/security/access.conf: 1adf5442f4695e074077e50a44f4693ccb4eb78630b6e1121e907370c1a8f4f391efcdbc5fd970a068ca8d6adf6af4e32f01a179748ceae82b3480e5874b3558
+        /etc/logrotate.conf: 03e4f4229d8a4b51c9e7afbb2cb089b86cc9ae6f4baf8aba73049a82ba222c97b4b0f573b0f2b03ad3f71018e52430451e98e339a42b1dbcf449f6800cfe21a0
+        /etc/logrotate.d/alternatives: 8c037780036315534cc41197af31a9f5c36a292ea677f37d463cd20978b171dff5c691eaf0c9e5d970c2365e6218c1b9982fddb6e05f976d54bdb344d83b8547
+        /etc/logrotate.d/autolog: aa9fb2c91aa9c357c5180c41749739da327282ffe811d2d49386f11e6e7046e84542ee7d460f2f61806f5dc530d86084bf12ba89fb814d52b39b3c341120717a
+        /etc/logrotate.d/dpkg: 10ccfa34548f027edcc0de9c648630e605f5100ec0a80add88a610b3b2e8e3651668780c224d65cdf8eb2b58698eb0281bf15f79e9fa47f8c770074f8cb83f3e
+        /etc/logrotate.d/btmp: e3c19eddc7c518f77aafd2dd4ea80f7c7229c646718887b80e6fc4e132b52fd8711cc0a0f56128a97dfec8511559b7c7641fef64886d993a041d778b36824e25
+        /etc/logrotate.d/wtmp: 43683f990dd7f5afd12b07d9f09c3be9ae475c2c844248662e43496e7ec45f09f8feef56571fff367673f02d3b4a52ddabd99023e7e4a7f03b7a4499a7ddf279
+        #/etc/ca-certificates.conf: ec724759132c0d24c13bd5215a80eb086c729e8d19036090167e335852a7cf242263b4229eeddb6fea5d7763ac30c9fa3fe871cf5cb78cb3ed1121795804cfda
+        /etc/tmpfiles.d/tmp.conf: f0d790a93fed9e2c8d6ea1b230e8bd9b791a35f5ca53d5506a53e1dd0a981973f7fef2c2f7044843c2bbc8868a284b0beaee28888fae40a8b4db7f3fd44ce291
+        #/etc/login.defs: 3195a8c05adf03d892273ec2abd48347f3f6382d502ef834d2f43afec45038ba229dd41cc0a5043093bd47882a030822d5cdea038d96cbc40aef605aa8efc8e3
+        #/etc/ftpusers: 7f812b76770c51e32e2d204b9ebc852528e795d70da2519b63d855b711c332fe6f47658ce41484ffcf3e39d573b66c7df9a6bb73f1f8eb7d050ea9343d1553af
+        /etc/securetty: 59c89246507c3c6f61ed61ddb2558bb020ce23e5f4b8083b28c2bba487bd3c79382634fa5d936c08808a6558ac03e59fa09e29b578e7f8b5f1c0c1fef5564bdc
+        #/etc/rkhunter.conf: f003ade08ecc58c9d396605495423a6689b8a0acc1b4c0374a9e2872116dbf7c0f85f4dda91d1da715d667af4ca8dbd3f12d31939a65b096bc192f52600875b4
+        /etc/default/sysstat: b34bbdd7aec422f5f9ac763938b7291e981f1110b8f1a623f643c387d7369a1011dd70ab4c6bddc95a3a907c15536dae812139be1c2dd7b8f99ccd95ddb41ccf
+        /etc/default/rkhunter: 8d1603fb5894d72ed80c49fe983b4b7a1d30f88d40348455c0c21c79cbc015e24f06882cb7242b535e27461d6060198007910e693f89e5877b6e6be73816771a
+        /etc/default/useradd: 90cb716a702d9c5955d13db2328b7fc31f82fbcf3e5addb02ff0f43472260ffe162c3f7bbf53630b8a81d90c34950d59c2d8aa43543e2640ccafa236b9aa4bde
+        /etc/default/debsums: 8264b7fbaf38963d8463dba850661eca8ff6d4ef684d159c95354a1080f0b5480a2ab125d6b503a9ec21e7d7d8509d718effb94047c3eb5d62669056a3c7ac50
+        /etc/default/aide: e35721ceb3a9259c146ba11a2e419511180171e81436ac331ee6411552ab477932d74d87c263277adae1d3f87d712bee27e1f0bc6903823ae3c698ced16269aa
+        /etc/sysctl.d/network.conf: 584a05f1886a0c5b71e017502824795a391f97ecf5a6e28933d10a009963fcb59fc979e728cd2e731682572cd77c057fcd0e5b4170662c55f354b0e9903a2c74
+        /etc/sysctl.d/sysctl.conf: edf087255a45712d2083bdb9bc13085c6310473eb0bf7c8e02fa4772e7916164664bc83cd88242f6e8ac0b15e412dfebc28148c1cf8e26fc77c94ba47e424f44
+        /usr/lib/sysctl.d/10-hardening.conf: 785a4578cb11ee470beecc75ca0a76988d3b81b9752cf787eff931e317b4303a58c7d57c1d4a4ea5b7e7422d0617a80ebea0d82d7409ddd04f7780d49bd67728
+        /etc/modprobe.d/CIS.conf: 53496ebc13d0685281ab15ff9639f62de17e46d88499203499223945d385d9dd95b5f2657d0e78a5c9863ce843840c582acff093f970dcf82f14e86107588417
+        /etc/modprobe.d/bashbunny.conf: 167490cbd4519edac09503e328a55bf9e513d2cd50018e8fe79590d8f851eada493785439d422f9f8fce46327b6a24845dd9093a2eaf0d046994b0219288a1bb
+        /etc/modprobe.d/firewire.conf: be39b6e9fa54423aca8476b74a2fa05314a994376a750e241affe5fe59b5779953247c22dee8306f7a2b2beb981231bfc11860d106af46b00fe85557117fef12
+        /etc/modprobe.d/usb-storage.conf: bd63700828774e0936e3b7e1db108fd91d6f97ef75eeb3fc7e0f6efa028c47a491b0d341164276a8dea7a9454997ca55111fb4731a14cd3889c7e8cb4b8ee10a
+        #/etc/ssh/ssh_config.d/harden.conf: 962eac688d025ba63c24fa734dc7d02d62e16a8f4fd37cb04ff6efe7893b4ba34ece1cdb67d2c4af331b5ba1c339371fa5647b2cc01889a035eff7f51734fa91
+    - name: Stat /etc/rkhunter.conf
+      ansible.builtin.stat:
+        path: /etc/rkhunter.conf
+      register: rkhunter
+    - name: Verify that /etc/rkhunter.conf exists
+      ansible.builtin.assert:
+        that: >
+          - rkhunter.stat.exists
+    - name: Check that rounds is configured for pam_unix in /etc/pam.d/common-password
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/common-password
+        line: "password\t[success=1 default=ignore]\tpam_unix.so obscure use_authtok try_first_pass yescrypt rounds=500000"
+        state: present
+        regexp: '^password\s+.+\s+pam_unix\.so(?!.*\brounds=[0-9]+\b).*$'
+      check_mode: yes
+      register: conf
+      failed_when: (conf is changed) or (conf is failed)
+    - name: Check that config is configured for pam_passwdqc in /etc/pam.d/common-password
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/common-password
+        line: "password\trequisite\t\t\tpam_passwdqc.so config=/etc/passwdqc.conf"
+        state: present
+        regexp: '^password\s+requisite\s+pam_passwdqc\.so\s+config=/etc/passwdqc\.conf'
+      check_mode: yes
+      register: conf
+      failed_when: (conf is changed) or (conf is failed)
+    - name: Check that pam_faillock.so preauth is configured to /etc/pam.d/common-auth
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/common-auth
+        line: "auth\trequired\t\t\tpam_faillock.so\tpreauth"
+        state: present
+        regexp: '^auth\s+required\s+pam_faillock\.so\s+preauth$'
+      check_mode: yes
+      register: conf
+      failed_when: (conf is changed) or (conf is failed)
+    - name: Check that pam_faillock.so authfail is configured to /etc/pam.d/common-auth
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/common-auth
+        line: "auth\t[default=die]\t\t\tpam_faillock.so authfail"
+        state: present
+        regexp: '^auth\s+\[default=die\]\s+pam_faillock\.so\s+authfail$'
+      check_mode: yes
+      register: conf
+      failed_when: (conf is changed) or (conf is failed)
+    - name: Check that pam_faildelay.so is present in /etc/pam.d/common-auth
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/common-auth
+        line: "auth\toptional\t\t\tpam_faildelay.so delay=20000000"
+        state: present
+        regexp: '^auth\s+optional\s+pam_faildelay\.so\s+delay=[0-9]+$'
+      check_mode: yes
+      register: conf
+      failed_when: (conf is changed) or (conf is failed)
+    # No idea where the extra space at the end comes from
+    - name: Check that pam_faillock.so is present in /etc/pam.d/common-account
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/common-account
+        line: "account\trequired\t\t\tpam_faillock.so "
+        state: present
+        regexp: '^account\s+required\s+pam_faillock\.so\s?$'
+      check_mode: yes
+      register: conf
+      failed_when: (conf is changed) or (conf is failed)
+    # Some bug in pam-auth-update appends " =" to the end of this line
+    #- name: Check that pam-auth-update has not broken common-account
+    #  ansible.builtin.lineinfile:
+    #    path: /etc/pam.d/common-account
+    #    line: "account\t[success=5 default=ignore]\tpam_succeed_if.so uid eq 0 service in chfn:chpasswd:chsh quiet"
+    #    state: present
+    #    regexp: '^account\s+\[success=[0-9]\s+default=ignore\]\s+pam_succeed_if\.so\s+uid\s+eq\s+0\s+service\s+in\s+chfn:chpasswd:chsh\s+quiet$'
+    #  check_mode: yes
+    #  register: conf
+    #  failed_when: (conf is changed) or (conf is failed)

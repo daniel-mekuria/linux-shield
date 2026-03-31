@@ -1,0 +1,48 @@
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+	chain INPUT {
+		type filter hook input priority 0;
+		ct state invalid counter drop
+		ip protocol {tcp, udp, icmp} ct state established counter accept
+{% for port in allowed_tcp_ports %}
+		tcp dport {{ port }} ct state new accept
+{% endfor %}
+		icmp type echo-request accept
+		icmp type {destination-unreachable, time-exceeded, parameter-problem} ct state related counter accept
+		iifname "lo" ip saddr 127.0.0.1 ip daddr 127.0.0.1 counter accept
+		iifname "lo" ip6 saddr ::1 ip6 daddr ::1 counter accept
+		counter reject with icmpx type admin-prohibited
+	}
+	# The forward policy for inet table is allowed, but drop for the ip & ip6 tables.
+	# This is because of Docker.
+	chain FORWARD {
+		type filter hook forward priority 0;
+	}
+	chain OUTPUT {
+		type filter hook output priority 0;
+	}
+}
+table ip filter {
+	chain FORWARD {
+		type filter hook forward priority 0; policy drop;
+	}
+	# https://docs.docker.com/engine/network/packet-filtering-firewalls/
+	# "By default, all external source IPs are allowed to connect to ports that have been published to the Docker host's addresses."
+	chain DOCKER-USER {
+		type filter hook forward priority 0; policy drop;
+		# Add something like the following to allow Docker containers to communicate to the internet
+		#iifname "docker0" oifname "<ext>" counter accept
+		#iifname "<ext>" oifname "docker0" ct state established,related counter accept
+	}
+}
+table ip6 filter {
+	chain FORWARD {
+		type filter hook forward priority 0; policy drop;
+	}
+	chain DOCKER-USER {
+		type filter hook forward priority 0; policy drop;
+	}
+}

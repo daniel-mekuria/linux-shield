@@ -1,0 +1,84 @@
+# This is a simple AIDE configuration for harden.sh project.
+# This is not comprehensive by any means, but just to keep
+# track of the most essential configuration files, binaries
+# and authentication/authorization related files and dirs.
+
+database_in=file:/var/lib/aide/aide.db
+database_out=file:/var/lib/aide/aide.db.new
+
+# From Debian:
+OwnerMode = p+u+g+ftype
+VarFile = OwnerMode+n+l+X
+VarDir = OwnerMode+n+i+X
+Log = OwnerMode+n+S+X
+# Replace MD5 with SHA256
+R = R-md5+sha256
+
+/boot					R
+=/home/					OwnerMode
+/home/[^/]+/\.ssh/authorized_keys$	f R
+/home/[^/]+/\.k5login$			f R
+/root/\.ssh/authorized_keys$		f R
+/root/\.k5login$			f R
+
+# Exceptions:
+/etc/resolv\.conf$			f VarFile
+/etc/udev$				d R-m-c
+/etc/udev/hwdb\.bin$			f VarFile
+/etc$					d VarDir
+# hwclock?
+/etc/adjtime$				f VarFile
+# Modified by rc.S
+/etc/motd$				f R-m-c-i
+/etc/random-seed$			f VarFile
+# Modified by system:
+/etc/mtab$				f OwnerMode
+/etc/ld\.so\.cache$			f VarFile
+/etc/ntp/drift$				f VarFile
+/etc/ntp$				d VarDir
+
+/(usr/local/)?etc			R
+
+# Binaries
+/usr/(local/)?s?bin			R
+/s?bin					R
+/usr/(local/)?games			R
+# libexec : Binaries run by other programs
+/usr/libexec				R
+
+# Libs
+/lib(64)?					R
+/usr/(local/)?lib(64)?				R
+/usr/i[45]86-slackware-linux/(lib|bin)		R
+/usr/x86_64-slackware-linux/(lib(64)?|bin)	R
+
+# CA certs
+/usr/(local/)?share/ca-certificates	R
+
+# Polkit
+/usr/share/polkit-1			R
+
+#/var/log/[^/]+-[0-9]+			R
+/var/log/.*-[0-9]{8}(\.gz)?$		R+ANF+ARF
+/var/log/(cron|debug|maillog|messages|secure|spooler|syslog)$	f Log
+=/var/					OwnerMode
+
+=/usr/(local/)?				OwnerMode
+=/usr/(local/)?share/			OwnerMode
+=/mnt/					OwnerMode
+=/media/				OwnerMode
+=/opt/					OwnerMode
+=/var/lib/				OwnerMode
+/var/lib/rkhunter/db			R
+# RKH_FILEPROP_LIST
+/var/lib/rkhunter/db/rkhunter_prop_list\.dat$	f R-m-c
+=/var/spool/				OwnerMode
+=/var/spool/mail/			OwnerMode
+/var/spool/cron/crontabs		R
+# Kerberos client keytabs (CKTNAME or KRB5_CLIENT_KTNAME)
+# https://web.mit.edu/kerberos/krb5-1.12/doc/mitK5defaults.html#paths
+/var/(kerberos/)?krb5			R
+# empty directory should be empty :)
+/var/empty				R
+
+=/					OwnerMode

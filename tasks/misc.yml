@@ -1,0 +1,453 @@
+---
+- name: Make installpkg store md5sums (Slackware)
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"
+  ansible.builtin.replace:
+    path: /sbin/installpkg
+    regexp: '^(MD5SUM)=[0-9]+$'
+    replace: '\g<1>=1'
+    validate: '/bin/grep "^MD5SUM=1$" %s'
+  tags:
+    - configuration
+    - slackware
+
+- name: Configure certbot to use 4096 bit keys
+  tags: pki
+  become: true
+  block:
+    - name: Check for /etc/letsencrypt
+      ansible.builtin.stat:
+        path: /etc/letsencrypt
+      register: stat_result
+      tags: check
+    # https://certbot.eff.org/docs/using.html
+    - name: Configure /etc/letsencrypt/cli.ini
+      community.general.ini_file:
+        path: /etc/letsencrypt/cli.ini
+        section: null
+        option: rsa-key-size
+        value: 4096
+        mode: '0600'
+      when: stat_result.stat.exists
+      tags: configuration
+
+- name: Configure /etc/krb5.conf
+  tags:
+    - configuration
+    - kerberos
+  community.general.ini_file:
+    path: /etc/krb5.conf
+    section: libdefaults
+    option: '{{ item.key }}'
+    value: '{{ item.value }}'
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  with_dict:
+    verify_ap_req_nofail: "true"
+    # CIS MIT Kerberos 1.10 Benchmark 3.1.7 Disallow weak encryption types (allow_weak_crypto)
+    allow_weak_crypto: "false"
+    # CIS MIT Kerberos 1.10 Benchmark 3.1.2 Ensure AES256 is the preferred encryption type for TGS (default_tgs_enctypes)
+    default_tgs_enctypes: aes256-cts-hmac-sha384-192 aes256-cts-hmac-sha1-96
+    # CIS MIT Kerberos 1.10 Benchmark 3.1.4 Ensure AES256 is the preferred encryption type for TKT (default_tkt_enctypes)
+    default_tkt_enctypes: aes256-cts-hmac-sha384-192 aes256-cts-hmac-sha1-96
+    # CIS MIT Kerberos 1.10 Benchmark 3.1.9 Ensure ignore_acceptor_hostname is not set to true
+    ignore_acceptor_hostname: "false"
+    # CIS MIT Kerberos 1.10 Benchmark 3.1.8 Ensure clockskew tolerance is minimized (clockskew)
+    clockskew: 300
+    # https://web.mit.edu/kerberos/krb5-current/doc/admin/spake.html#spake
+    spake_preauth_groups: edwards25519
+    #default_ccache_name: FILE:/run/user/%{uid}/krb5cc_%{uid}
+
+# These are packages that ship SUID/SGID binaries, pam.d configurations, services or similar stuff that provides unnecessary attack surface
+# Slackware Linux Benchmark v1.1:
+#   * SN.5 Evaluate Packages Associated With Startup Scripts
+#   * 7.1 Disable rhosts Support
+# system-hardening-10.2.txt: Misc Stuff -> Stuff to remove
+#
+# Consider removing some of these packages as they were part of the most patched ones in Slackware 14.2
+# Parsed with: sed -n 's/^patches\/packages\/\(.\+\)-.\+-.\+-.\+\.t.z: .*$/\1/p' ChangeLog.txt | sort | uniq -c | sort -g
+#   * bind
+#   * seamonkey
+#   * seamonkey-solibs
+#   * samba
+#   * httpd & php
+#   * mariadb
+# ANSSI-BP-028 R58 - Installing only strictly necessary packages
+- name: Remove stuff
+  become: true
+  tags: slackware
+  when: ansible_facts['distribution'] == "Slackware"
+  block:
+    - name: Remove unneeded/unwanted packages (Slackware)
+      community.general.slackpkg:
+        name: '{{ item }}'
+        state: absent
+        update_cache: true
+      with_items:
+        - netkit-rsh
+        - uucp
+        - floppy
+        - netatalk
+        - slrn
+        - yptools
+        # libmm-glib.so is required by nm-applet
+        #- ModemManager
+        - modemmanager-qt
+        - inetd
+        - at
+        - ksh93
+        - popa3d
+      tags: packages
+    - name: Remove leftover files from removed packages
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: absent
+      with_items:
+        - /etc/pam.d/netatalk
+        - /etc/rc.d/rc.atalk
+        - /etc/rc.d/rc.inetd
+        - /etc/inetd.conf
+        - /etc/rc.d/rc.atd
+
+#- name: Download checksec into /usr/local/bin
+#  become: true
+#  ansible.builtin.get_url:
+#    url: https://www.trapkit.de/tools/checksec/checksec.sh
+#    dest: /usr/local/bin/checksec.sh
+#    owner: root
+#    group: root
+#    mode: '0755'
+#    checksum: sha256:77b8a7fd9393d10def665658a41176ee745d5c7969a4a0f43cefcc8a4cd90947
+
+# TODO: Make a systemd unit or something. rc.local doesn't exist anymore in modern Debians.
+#- name: Set USB authorized_default -> 0 in /etc/rc.local (Debian)
+#  become: true
+#  ansible.builtin.blockinfile:
+#    path: /etc/rc.local
+#    marker: "# {mark} ANSIBLE MANAGED BLOCK - USB authorized_default"
+#    insertbefore: '^exit 0$'
+#    block: |
+#      /bin/bash -c 'shopt -s nullglob; for host in /sys/bus/usb/devices/usb*; do echo 0 1>"${host}/authorized_default"; done'
+#  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali"
+#  tags:
+#    - configuration
+#    - debian
+
+- name: Docker
+  tags: docker
+  block:
+    - name: Stat /etc/docker
+      ansible.builtin.stat:
+        path: /etc/docker
+      register: docker
+      tags: check
+    - name: Create /etc/docker/daemon.json
+      become: true
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        force: false
+        owner: root
+        group: root
+        mode: '0600'
+        content: |
+          {
+            "experimental": false,
+            "icc": false,
+            "insecure-registries": [],
+            "no-new-privileges": true
+          }
+      when: docker.stat.exists
+
+- name: GNOME tracker
+  tags:
+    - configuration
+    - gnome
+    - services
+  block:
+    - name: Stat /etc/xdg/autostart/tracker-miner-fs.desktop
+      ansible.builtin.stat:
+        path: '/etc/xdg/autostart/tracker-miner-fs.desktop'
+      register: stat
+      tags: check
+    - name: Disable tracker-miner-fs XDG autostart
+      become: true
+      ansible.builtin.lineinfile:
+        path: '/etc/xdg/autostart/tracker-miner-fs.desktop'
+        regexp: '^Hidden=true$'
+        line: Hidden=true
+        create: false
+      when: stat.stat.exists
+    - name: Stat /etc/xdg/autostart/tracker-extract.desktop
+      ansible.builtin.stat:
+        path: '/etc/xdg/autostart/tracker-extract.desktop'
+      register: stat
+      tags: check
+    - name: Disable tracker-miner-fs XDG autostart
+      become: true
+      ansible.builtin.lineinfile:
+        path: '/etc/xdg/autostart/tracker-extract.desktop'
+        regexp: '^Hidden=true$'
+        line: Hidden=true
+        create: false
+      when: stat.stat.exists
+    - name: Disable tracker-miner-fs systemd unit
+      ansible.builtin.systemd:
+        name: tracker-miner-fs
+        enabled: false
+        state: stopped
+        scope: user
+      register: result
+      failed_when:
+        - result.failed
+        - '"Could not find the requested service tracker-miner-fs" not in result.msg'
+      when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali"
+      tags:
+        - debian
+        - molecule-notest
+    # TODO: Stopped working for Debian 13
+    # See https://github.com/ansible/ansible/issues/85714
+    #- name: Mask tracker-miner-fs-3 & tracker-extract-3 systemd units
+    #  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali"
+    #  become: true
+    #  ansible.builtin.systemd:
+    #    name: '{{ item }}'
+    #    scope: global
+    #    masked: true
+    #  register: result
+    #  failed_when:
+    #    - result.failed
+    #    - '"Failed to connect to bus: No such file or directory" not in result.msg'
+    #  with_items:
+    #    - tracker-miner-fs-3
+    #    - tracker-extract-3
+    #  tags:
+    #    - debian
+    #    - molecule-notest
+
+# SHLL-6211
+- name: Remove extraneous shells from /etc/shells
+  become: true
+  tags:
+    - configuration
+    - shells
+  ansible.builtin.lineinfile:
+    path: /etc/shells
+    state: absent
+    regexp: '^{{ item }}$'
+  with_items:
+    - /bin/tcsh
+    - /bin/csh
+    - /bin/dash
+    - /bin/ash
+    - /bin/ksh
+    - /bin/mksh
+    - /bin/mksh-static
+    - /usr/lib/klibc/bin/mksh-static
+    # Debian & Ubuntu
+    - /usr/bin/sh
+    - /usr/bin/bash
+    - /usr/bin/dash
+
+# https://www.freedesktop.org/software/systemd/man/coredump.conf.html
+# https://cisofy.com/lynis/controls/KRNL-5820/
+# https://www.cyberciti.biz/faq/disable-core-dumps-in-linux-with-systemd-sysctl/
+- name: Configure coredump.ini
+  tags:
+    - configuration
+    - kernel
+  become: true
+  when: ansible_facts['distribution'] != "Slackware"
+  community.general.ini_file:
+    path: /etc/systemd/coredump.conf
+    section: Coredump
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+    owner: root
+    group: root
+    mode: '0644'
+  with_dict:
+    Storage: none
+    ProcessSizeMax: 0
+
+- name: NTP
+  become: true
+  tags: ntp
+  block:
+    # ANSSI-BP-028 R51 - Changing the secrets and access rights as soon as possible
+    - name: Comment out default keys from /etc/ntp.keys
+      register: result
+      failed_when:
+        - result.failed
+        - result.msg != "Path /etc/ntp.keys does not exist !"
+      ansible.builtin.replace:
+        path: /etc/ntp.keys
+        regexp: '^((1|65535)\s+M\s+(akey|pass))$'
+        replace: '#\g<1>'
+    - name: Disable monlist in NTP
+      ansible.builtin.lineinfile:
+        path: /etc/ntp.conf
+        regexp: '^disable\s+monitor$'
+        line: disable monitor
+        create: false
+      register: result
+      failed_when:
+        - result.failed
+        - result.msg != "Destination /etc/ntp.conf does not exist !"
+
+# https://github.com/pyllyukko/harden.yml/wiki/Restricted-shell
+- name: rbash
+  become: true
+  tags: shells
+  # Currently we have PAM configs only for Slackware & Debian
+  when: ansible_facts['distribution'] == "Slackware" or ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Ubuntu"
+  block:
+    - name: Create a rbash symbolic link
+      ansible.builtin.file:
+        src: /bin/bash
+        dest: /bin/rbash
+        owner: root
+        group: root
+        state: link
+    - name: Create directories for restricted shell
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      with_items:
+        - /usr/local/rbin
+        - /var/empty
+    - name: Create symbolic links to /usr/local/rbin/
+      ansible.builtin.file:
+        src: '{{ item.key }}'
+        dest: '/usr/local/rbin/{{ item.value }}'
+        owner: root
+        group: root
+        state: link
+      # Basic set of tools
+      with_dict:
+        /bin/cat: cat
+        /usr/bin/chage: chage
+        /bin/cp: cp
+        /bin/df: df
+        /bin/du: du
+        /bin/id: id
+        /bin/ls: ls
+        /bin/mkdir: mkdir
+        /bin/mv: mv
+        /usr/bin/passwd: passwd
+        /bin/printenv: printenv
+        /usr/bin/view: rview
+        /usr/bin/vim: rvim
+        /bin/uname: uname
+        /usr/bin/uptime: uptime
+        /bin/who: who
+        /usr/bin/sleep: sleep
+        /usr/bin/chmod: chmod
+        /usr/bin/rm: rm
+      register: result
+      failed_when:
+        - result.failed
+        - '"src file does not exist" not in result.msg'
+    - name: Set PATH in /etc/restricted_env
+      tags:
+        - pam
+        - configuration
+      ansible.builtin.copy:
+        dest: /etc/restricted_env
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          PATH=/usr/local/rbin
+    - name: Make sure rbash is not in the /etc/shells configuration
+      ansible.builtin.lineinfile:
+        path: /etc/shells
+        state: absent
+        regexp: '^(/usr)?/bin/rbash$'
+    # https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libraries.html
+    # https://amir.rachum.com/shared-libraries/#runtime-search-path
+    # LD.SO(8)
+    - name: Configure rbash stuff into /etc/profile
+      ansible.builtin.blockinfile:
+        path: /etc/profile
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - rbash"
+        block: |
+          # This needs to come after the /etc/profile.d stuff to properly restrict PATH
+          # and to avoid unnecessary error messages.
+          if [ "$SHELL" = "/bin/rbash" -o "$SHELL" = "/usr/local/bin/rbash" ]
+          then
+            export PATH="/usr/local/rbin"
+            export LESSSECURE=1
+            # Pagers & VISUAL
+            export PAGER=/usr/bin/less
+            export MANPAGER=/usr/bin/less
+            export SYSTEMD_PAGER=/usr/bin/less
+            export VISUAL=/usr/local/rbin/rvim
+            # These need to be set read-only here to prevent user's startup files from modifying them later
+            typeset -r PATH HISTFILE LESSSECURE IFS PAGER MANPAGER SYSTEMD_PAGER SHELL VISUAL ENV BASH_ENV LD_PRELOAD LD_AUDIT LD_LIBRARY_PATH LD_DEBUG LD_DEBUG_OUTPUT LD_DYNAMIC_WEAK LD_ORIGIN_PATH LD_PROFILE LD_PROFILE_OUTPUT LD_SHOW_AUXV LD_USE_LOAD_BIAS LD_PREFER_MAP_32BIT_EXEC LD_RUN_PATH LD_ASSUME_KERNEL GCONV_PATH GLIBC_TUNABLES PYTHONSTARTUP PYTHONHOME PYTHONUSERBASE PERLLIB PERL5OPT PERL5LIB TMPDIR GETCONF_DIR HOSTALIASES LOCALDOMAIN LOCPATH MALLOC_TRACE NIS_PATH NLSPATH RESOLV_HOST_CONF RES_OPTIONS TZDIR MAIL_CONFIG
+            # Override the one set at /etc/profile.d/coreutils-dircolors.sh, since that
+            # uses /bin/ls.
+            alias ls='ls $LS_OPTIONS'
+            # Before activating the restrictions, jump to a non-writable directory
+            cd /var/empty
+            # Activate the restrictions before user's configuration is being read.
+            set -r
+            # Let the user know this is a restricted environment.
+            shopt restricted_shell
+          fi
+  # </rbash>
+
+- name: Configure MAILADDR in /etc/cron.daily/certwatch
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"
+  tags:
+    - slackware
+    - configuration
+    - pki
+  ansible.builtin.replace:
+    path: /etc/cron.daily/certwatch
+    regexp: '^(MAILADDR)=.+$'
+    replace: '\g<1>={{ alert_email }}'
+    validate: '/bin/grep "^MAILADDR={{ alert_email }}$" %s'
+    backup: true
+  register: result
+  failed_when:
+    - result.failed == true
+    - result.msg != "Path /etc/cron.daily/certwatch does not exist !"
+- name: Configure MAILADDR in /etc/mdadm.conf
+  become: true
+  tags:
+    - configuration
+  ansible.builtin.replace:
+    path: /etc/mdadm.conf
+    regexp: '^#?(MAILADDR\s+).*$'
+    replace: '\g<1>{{ alert_email }}'
+    validate: '/bin/grep "^MAILADDR\s\+{{ alert_email }}$" %s'
+    backup: true
+  register: result
+  failed_when:
+    - result.failed == true
+    - result.msg != "Path /etc/mdadm.conf does not exist !"
+- name: polkit
+  tags:
+    - polkit
+    - authorization
+  become: true
+  block:
+    - name: Stat /etc/polkit-1/rules.d
+      tags: check
+      ansible.builtin.stat:
+        path: /etc/polkit-1/rules.d
+      register: stat_polkit_etc
+    - name: Disallow non-admin users from authenticating as other users in polkit
+      when: stat_polkit_etc.stat.exists
+      ansible.builtin.template:
+        src: 49-deny-non-admins.rules.j2
+        dest: /etc/polkit-1/rules.d/49-deny-non-admins.rules
+        mode: '0640'
+        owner: root
+        group: polkitd

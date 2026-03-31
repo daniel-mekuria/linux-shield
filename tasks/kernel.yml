@@ -1,0 +1,81 @@
+---
+- name: mkdir /etc/sysctl.d
+  ansible.builtin.file:
+    path: /etc/sysctl.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+# ANSSI-BP-028 R9  - Configuring the kernel options
+# ANSSI-BP-028 R12 - IPv4 configuration options
+# ANSSI-BP-028 R14 - File system configuration options
+- name: Create harden.conf sysctl settings file
+  become: true
+  ansible.builtin.copy:
+    src: "sysctl.d/{{ item }}.conf.new"
+    dest: /etc/sysctl.d/{{ item }}.conf
+    owner: root
+    group: root
+    mode: '0600'
+    backup: true
+  with_items:
+    - sysctl
+    - network
+  tags:
+    - configuration
+    - kernel
+    - network
+  notify: "Load sysctl settings"
+- name: Create /etc/modprobe.d/
+  become: true
+  ansible.builtin.file:
+    path: /etc/modprobe.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  tags: kernel
+- name: Blacklist certain kernel modules
+  become: true
+  ansible.builtin.copy:
+    src: "modprobe.d/{{ item }}.conf.new"
+    dest: /etc/modprobe.d/{{ item }}.conf
+    owner: root
+    group: root
+    mode: '0600'
+  tags:
+    - configuration
+    - kernel
+  with_items:
+    - CIS
+    - bashbunny
+    - firewire
+    - usb-storage
+# https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/selinux_users_and_administrators_guide/sect-security-enhanced_linux-working_with_selinux-disable_ptrace
+#- name: Disable ptrace() with SELinux
+#  become: true
+#  when: ansible_facts['os_family'] == "RedHat"
+#  ansible.posix.seboolean:
+#    name: deny_ptrace
+#    state: true
+#    persistent: true
+#  tags:
+#    - configuration
+#    - kernel
+#    - centos
+
+- name: Print Lynis score for kernel hardening
+  become: true
+  tags: kernel
+  when: run_lynis_after_hardening
+  block:
+    - name: Run Lynis test group kernel hardening
+      ansible.builtin.command: lynis audit system -q --skip-plugins --tests-from-group kernel_hardening # noqa no-changed-when
+      tags: check
+    - name: slurp /var/log/lynis.log
+      ansible.builtin.slurp:
+        src: /var/log/lynis.log
+      register: lynis_log
+    - name: Print Lynis score for kernel hardening
+      ansible.builtin.debug:
+        msg: "{{ lynis_log['content'] | b64decode | regex_search('Hardening index : \\[([0-9]+)\\]', '\\1', multiline=True) }}"

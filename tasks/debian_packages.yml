@@ -1,0 +1,347 @@
+---
+- name: Install security software
+  tags: debian
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+  become: true
+  block:
+    - name: Install security software
+      ansible.builtin.apt:
+        name: "{{ packages }}"
+        update_cache: true
+      vars:
+        # checksecurity also brings logcheck
+        packages:
+          #- bootlogd
+          - autolog
+          - needrestart
+          - arpwatch
+          - usbguard
+          - unattended-upgrades
+          - checksec
+          - hardening-runtime
+          - apt-show-versions
+      tags:
+        - packages
+        - services
+    # This does not exist in Kali
+    - name: Install checksecurity
+      when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Ubuntu"
+      ansible.builtin.apt:
+        name: checksecurity
+      tags: packages
+    - name: Install chkrootkit
+      tags:
+        - chkrootkit
+        - packages
+      ansible.builtin.apt:
+        name: chkrootkit
+    - name: Install Tiger
+      tags:
+        - tiger
+        - packages
+      ansible.builtin.apt:
+        name: tiger
+
+# The JtR packaged with Debian 12 (1.9.0) doesn't support the modern hashing algorithms
+#- name: John
+#  become: true
+#  tags:
+#    - john
+#    - passwords
+#  block:
+#    - name: Check /etc/john
+#      tags: check
+#      ansible.builtin.stat:
+#        path: /etc/john
+#      register: stat_john
+#    - name: Check /etc/cron.d/john
+#      tags: check
+#      ansible.builtin.stat:
+#        path: /etc/cron.d/john
+#      register: stat_john_cron
+#    - name: Configure John
+#      tags: configuration
+#      when:
+#        - stat_john.stat.exists
+#        - stat_john.stat.isdir
+#        - stat_john_cron.stat.exists
+#      block:
+#        - name: Copy john-mail.conf
+#          ansible.builtin.copy:
+#            dest: /etc/john/john-mail.conf
+#            src: john-mail.conf
+#            owner: root
+#            group: root
+#            mode: '0600'
+#            backup: true
+#        - name: Enable John cronjobs
+#          ansible.builtin.replace:
+#            path: /etc/cron.d/john
+#            regexp: '^#?([0-9]+\s+[0-9]+\s+\*\s+\*\s+\*\s+root\s+\[\s+-x\s+/usr/share/john/cronjob\s+\]\s+&&\s+(nice\s+)?/usr/share/john/cronjob\s+st(art|op))$'
+#            replace: '\g<1>'
+#            backup: true
+#        # https://www.shellcheck.net/wiki/SC2069
+#        - name: Fix SC2069 in /usr/share/john/cronjob
+#          ansible.builtin.replace:
+#            path: /usr/share/john/cronjob
+#            regexp: '^(\s+/sbin/start-stop-daemon --stop -q -o --pidfile \$PIDDIR/john.pid) 2>&1 >/dev/null$'
+#            replace: '\g<1> >/dev/null 2>&1'
+#            backup: true
+
+- name: Tiger
+  become: true
+  tags: tiger
+  block:
+    - name: Check /etc/tiger
+      tags: check
+      ansible.builtin.stat:
+        path: /etc/tiger
+      register: stat_tiger
+    - name: Tiger configs
+      tags: configuration
+      when:
+        - stat_tiger.stat.exists
+        - stat_tiger.stat.isdir
+      block:
+        - name: Copy tiger.ignore
+          ansible.builtin.copy:
+            src: tiger.ignore
+            dest: /etc/tiger/tiger.ignore
+            owner: root
+            group: root
+            mode: '0600'
+            backup: true
+        - name: Copy tigerrc
+          ansible.builtin.template:
+            src: tigerrc.j2
+            dest: /etc/tiger/tigerrc
+            owner: root
+            group: root
+            mode: '0600'
+            backup: true
+        # [ -L /lib/ ] == false, but [ -L /lib ] == true
+        # https://git.savannah.nongnu.org/cgit/tiger.git/tree/systems/Linux/2/deb_nopackfiles#n121
+        # Since Debian's /usr merge the lin001w test will produce megabytes worth of FPs when the symlink test fails.
+        # https://wiki.debian.org/UsrMerge
+        # TODO: Add /usr/lib?
+        - name: Fix deb_nopackfiles
+          when: ansible_facts['distribution'] == "Debian"
+          ansible.builtin.replace:
+            path: /usr/lib/tiger/systems/Linux/2/deb_nopackfiles
+            # Tiger is an old piece of software
+            encoding: ISO-8859-1
+            regexp: '^(dirlist=)"/bin/ /usr/bin/ /sbin/ /usr/sbin/ /lib/ /usr/X11R6/bin"$'
+            replace: '\g<1>"/bin /usr/bin /sbin /usr/sbin /lib /usr/X11R6/bin"'
+
+- name: Comment out user.max_user_namespaces=0 in /usr/lib/sysctl.d/10-hardening.conf
+  tags:
+    - debian
+    - configuration
+    - kernel
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali"
+  become: true
+  #notify: "Load sysctl settings"
+  ansible.builtin.replace:
+    path: /usr/lib/sysctl.d/10-hardening.conf
+    regexp: "^(user.max_user_namespaces = 0)$"
+    replace: '#\1'
+  register: result
+  failed_when:
+    - result.failed
+    - result.msg != "Path /usr/lib/sysctl.d/10-hardening.conf does not exist !"
+
+# debsecan
+- name: debsecan
+  when: ansible_facts['distribution'] == "Debian"
+  tags:
+    - debsecan
+    - debian
+  become: true
+  block:
+    - name: Install debsecan
+      ansible.builtin.apt:
+        name: debsecan
+      tags: packages
+    - name: Configure debsecan
+      ansible.builtin.debconf:
+        name: debsecan
+        question: debsecan/suite
+        vtype: select
+        value: "{{ ansible_facts['distribution_release'] }}"
+      tags: configuration
+    - name: Configure debsecan MAILTO
+      tags:
+        - configuration
+      ansible.builtin.replace:
+        path: '{{ item }}'
+        regexp: '^(MAILTO)=.*$'
+        replace: '\g<1>={{ alert_email }}'
+        validate: '/bin/grep "^MAILTO={{ alert_email }}$" %s'
+        backup: true
+      with_items:
+        - /etc/default/debsecan
+        - /etc/cron.d/debsecan
+
+# debsums
+- name: debsums
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali"
+  become: true
+  tags:
+    - debsums
+    - debian
+  block:
+    - name: Install debsums
+      ansible.builtin.apt:
+        name: debsums
+      tags: packages
+    - name: Enable weekly debsums run
+      ansible.builtin.replace:
+        path: /etc/default/debsums
+        regexp: '^(CRON_CHECK=).*'
+        replace: '\g<1>weekly'
+      tags: configuration
+
+- name: Configure chkrootkit
+  become: true
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+  tags:
+    - chkrootkit
+    - debian
+  block:
+    # See https://github.com/pyllyukko/harden.yml/wiki/chkrootkit
+    - name: getent passwd
+      ansible.builtin.getent:
+        database: passwd
+      tags: check
+    - name: Create /etc/chkrootkit/chkrootkit.ignore
+      tags: configuration
+      ansible.builtin.template:
+        dest: "{{ chkrootkit_conf_dir }}/chkrootkit.ignore"
+        src: chkrootkit.ignore.j2
+        owner: root
+        group: root
+        mode: '0400'
+    - name: Configure /etc/cron.daily/chkrootkit to use chkrootkit.ignore
+      tags: configuration
+      ansible.builtin.replace:
+        path: /etc/cron.daily/chkrootkit
+        regexp: '^(IGNORE_FILE=).*'
+        replace: '\g<1>{{ chkrootkit_conf_dir }}/chkrootkit.ignore'
+    - name: Configure chkrootkit.conf
+      tags: configuration
+      ansible.builtin.template:
+        dest: "{{ chkrootkit_conf_dir }}/chkrootkit.conf"
+        src: chkrootkit.conf.j2
+        owner: root
+        group: root
+        mode: '0600'
+        backup: true
+    - name: Stat /var/log/chkrootkit/log.today
+      tags: check
+      ansible.builtin.stat:
+        path: /var/log/chkrootkit/log.today
+      register: stat_log_today
+    - name: Stat /var/log/chkrootkit/log.expected
+      tags: check
+      ansible.builtin.stat:
+        path: /var/log/chkrootkit/log.expected
+      register: stat_log_expected
+    - name: Copy /var/log/chkrootkit/log.today -> /var/log/chkrootkit/log.expected
+      tags: configuration
+      when:
+        - stat_log_today.stat.exists
+        - not stat_log_expected.stat.exists
+      ansible.builtin.copy:
+        src: /var/log/chkrootkit/log.today
+        dest: /var/log/chkrootkit/log.expected
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+
+- name: Debian APT
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali"
+  become: true
+  tags:
+    - debian
+    - configuration
+  block:
+    # Ansible's apt module doesn't install suggested packages,
+    # but we don't want them later on either.
+    - name: Configure APT not to install suggested packages
+      ansible.builtin.copy:
+        content: "APT::Install-Suggests \"false\";\n"
+        dest: /etc/apt/apt.conf.d/99suggested
+        owner: root
+        group: root
+        mode: '0644'
+        force: false
+    # https://www.debian.org/releases/buster/amd64/release-notes/ch-whats-new.en.html#apt-sandboxing
+    - name: Configure APT to use seccomp-BPF sandboxing
+      ansible.builtin.copy:
+        content: "APT::Sandbox::Seccomp \"true\";\n"
+        dest: /etc/apt/apt.conf.d/40sandbox
+        owner: root
+        group: root
+        mode: '0644'
+        force: false
+    - name: Configure email_address in /etc/apt/listchanges.conf
+      community.general.ini_file:
+        path: /etc/apt/listchanges.conf
+        section: apt
+        option: email_address
+        value: "{{ alert_email }}"
+        owner: root
+        group: root
+        mode: '0644'
+        create: false
+      register: result
+      failed_when:
+        - result.failed
+        - result.msg != "Destination /etc/apt/listchanges.conf does not exist!"
+
+- name: Configure SENDMAILTO in /etc/logcheck/logcheck.conf
+  become: true
+  tags:
+    - debian
+    - configuration
+  ansible.builtin.replace:
+    path: /etc/logcheck/logcheck.conf
+    regexp: '^(SENDMAILTO=).+$'
+    replace: '\g<1>"{{ alert_email }}"'
+    validate: '/bin/grep "^SENDMAILTO=\"{{ alert_email }}\"$" %s'
+    backup: true
+  register: result
+  failed_when:
+    - result.failed
+    - result.msg != "Path /etc/logcheck/logcheck.conf does not exist !"
+
+# https://www.whonix.org/wiki/Packages_for_Debian_Hosts
+# https://www.kicksecure.com/wiki/Packages_for_Debian_Hosts#Supported_Packages
+# https://www.kicksecure.com/wiki/Linux_Kernel_Runtime_Guard_LKRG
+#- name: LKRG
+#  become: true
+#  tags:
+#    - lkrg
+#    - debian
+#    - packages
+#    - kernel
+#  block:
+#    - name: Add Whonix PGP key
+#      ansible.builtin.get_url:
+#        #url: https://www.whonix.org/keys/derivative.asc
+#        url: https://www.kicksecure.com/keys/derivative.asc
+#        dest: /usr/share/keyrings/derivative.asc
+#        owner: root
+#        group: root
+#        mode: '0644'
+#    - name: Add Whonix repository
+#      ansible.builtin.apt_repository:
+#        # The Whonix repo didn't seem to contain LKRG
+#        #repo: "deb [signed-by=/usr/share/keyrings/derivative.asc] https://deb.whonix.org bookworm main contrib non-free"
+#        repo: "deb [signed-by=/usr/share/keyrings/derivative.asc] https://deb.kicksecure.com bookworm main contrib non-free"
+#        state: present
+#    - name: Install LKRG
+#      ansible.builtin.apt:
+#        name: lkrg
+#        update_cache: true

@@ -1,0 +1,7 @@
+Name: Limit password reuse
+Default: no
+Priority: 1023
+Conflicts: krb5
+Password-Type: Primary
+Password:
+	required			pam_pwhistory.so use_authtok

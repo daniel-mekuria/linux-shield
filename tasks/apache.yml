@@ -1,0 +1,166 @@
+---
+- name: Stat /etc/httpd/httpd.conf
+  when: ansible_facts['distribution'] == "Slackware"
+  ansible.builtin.stat:
+    path: /etc/httpd/httpd.conf
+  register: stat_result
+  tags:
+    - check
+    - apache
+- name: Configure Apache
+  when:
+    - ansible_facts['distribution'] == "Slackware"
+    - stat_result.stat.exists
+  become: true
+  tags:
+    - configuration
+    - apache
+    - slackware
+  block:
+    # CIS Apache HTTP Server 2.4 Benchmark v2.0.0 - 10-15-2020
+    #   * 2.3 Ensure the WebDAV Modules Are Disabled
+    #   * 2.4 Ensure the Status Module Is Disabled
+    #   * 2.5 Ensure the Autoindex Module Is Disabled
+    #   * 2.6 Ensure the Proxy Modules Are Disabled
+    #   * 2.7 Ensure the User Directories Module Is Disabled
+    #   * 2.8 Ensure the Info Module Is Disabled
+    #   * 2.9 Ensure the Basic and Digest Authentication Modules are Disabled
+    - name: Disable Apache modules
+      ansible.builtin.replace:
+        path: /etc/httpd/httpd.conf
+        regexp: '^(LoadModule\s+{{ item }}\b.+)$'
+        replace: '#\g<1>'
+        validate: '/bin/grep "^#LoadModule\s\+{{ item }}\b" %s'
+      with_items:
+        - dav_module
+        - dav_fs_module
+        - status_module
+        - autoindex_module
+        - proxy_.*module
+        - userdir_module
+        - info_module
+        - auth_basic_module
+        - auth_digest_module
+    - name: Enable TLS module
+      ansible.builtin.replace:
+        path: /etc/httpd/httpd.conf
+        regexp: '^#({{ item }}.*)$'
+        replace: '\g<1>'
+        validate: '/bin/grep "^{{ item }}" %s'
+      with_items:
+        - LoadModule ssl_module
+        - LoadModule socache_shmcb_module
+        - Include /etc/httpd/extra/httpd-ssl\.conf
+    # https://httpd.apache.org/docs/current/mod/mod_ssl.html
+    # https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslciphersuite:
+    #   "Beginning with version 2.4.7, null and export-grade ciphers are always disabled,
+    #   as mod_ssl unconditionally adds !aNULL:!eNULL:!EXP to any cipher string at initialization."
+    - name: Configure Apache TLS
+      ansible.builtin.replace:
+        path: /etc/httpd/extra/httpd-ssl.conf
+        regexp: '^({{ item.key }}\s+).*$'
+        replace: '\g<1>{{ item.value }}'
+        validate: '/bin/grep "^{{ item.key }}\s\+{{ item.value }}$" %s'
+      with_dict:
+        SSLHonorCipherOrder: "on"
+        SSLProtocol: all -SSLv2 -SSLv3 -TLSv1 -TLSv1.1 -TLSv1.2
+        SSLCipherSuite: "HIGH"
+
+    - name: HSTS
+      tags: hsts
+      block:
+        - name: Enable headers module
+          ansible.builtin.replace:
+            path: /etc/httpd/httpd.conf
+            regexp: '^#?(LoadModule\s+headers_module\s+.+\.so)$'
+            replace: '\g<1>'
+            validate: '/bin/grep "^LoadModule\s\+headers_module\s\+.\+\.so$" %s'
+        - name: Add HSTS header configuration to /etc/httpd/httpd.conf
+          ansible.builtin.lineinfile:
+            path: /etc/httpd/httpd.conf
+            regexp: '^Header always set Strict-Transport-Security "max-age=[0-9]+; includeSubDomains"$'
+            line: 'Header always set Strict-Transport-Security "max-age={{ hsts_max_age }}; includeSubDomains"'
+            owner: root
+            group: root
+            mode: '0644'
+
+    # https://httpd.apache.org/docs/2.4/mod/core.html#servertokens
+    - name: Configure ServerTokens
+      ansible.builtin.replace:
+        path: /etc/httpd/extra/httpd-default.conf
+        regexp: '^(ServerTokens\s+).+$'
+        replace: '\g<1>Prod'
+        validate: '/bin/grep "^ServerTokens\s\+Prod$" %s'
+    - name: Include httpd-default.conf
+      ansible.builtin.replace:
+        path: /etc/httpd/httpd.conf
+        regexp: '^#?(Include\s+/etc/httpd/extra/httpd-default\.conf)$'
+        replace: '\g<1>'
+        validate: '/bin/grep "^Include\s\+/etc/httpd/extra/httpd-default\.conf$" %s'
+    - name: Configure TraceEnable
+      ansible.builtin.lineinfile:
+        path: /etc/httpd/httpd.conf
+        regexp: '^TraceEnable\s+off$'
+        line: 'TraceEnable off'
+        owner: root
+        group: root
+        mode: '0644'
+    - name: Add X-Frame-Options HTTP header
+      ansible.builtin.lineinfile:
+        path: /etc/httpd/httpd.conf
+        regexp: '^Header\s+always\s+set\s+X-Frame-Options\s+SAMEORIGIN$'
+        line: 'Header always set X-Frame-Options SAMEORIGIN'
+        owner: root
+        group: root
+        mode: '0644'
+
+- name: php.ini
+  tags:
+    - php
+    - configuration
+  block:
+    - name: Stat /etc/php.ini
+      ansible.builtin.stat:
+        path: /etc/php.ini
+      register: stat_result
+      tags: check
+    # https://cheatsheetseries.owasp.org/cheatsheets/PHP_Configuration_Cheat_Sheet.html
+    # https://www.cyberciti.biz/faq/linux-unix-apache-lighttpd-phpini-disable-functions/
+    # https://stackoverflow.com/questions/3115559/exploitable-php-functions/3697776#3697776
+    # https://www.feistyduck.com/library/apache-security/
+    # The e modifier has been deprecated,
+    # so this list doesn't disable preg_replace function
+    # (https://www.php.net/manual/en/reference.pcre.pattern.modifiers.php)
+    #
+    # PHP-2372
+    # TODO: Moar content!
+    - name: Configure php.ini (PHP section)
+      become: true
+      when: stat_result.stat.exists
+      community.general.ini_file:
+        path: /etc/php.ini
+        section: PHP
+        option: "{{ item.key }}"
+        value: "{{ item.value }}"
+        owner: root
+        group: root
+        mode: '0644'
+      with_dict:
+        expose_php: 'Off'
+        display_errors: 'Off'
+        display_startup_errors: 'Off'
+        allow_url_include: 'Off'
+        allow_url_fopen: 'Off'
+        disable_functions: 'system,exec,shell_exec,popen,proc_open,pcntl_exec,passthru,str_rot13'
+        enable_dl: 'Off'
+    - name: Configure php.ini (Session section)
+      become: true
+      when: stat_result.stat.exists
+      community.general.ini_file:
+        path: /etc/php.ini
+        section: Session
+        option: session.use_strict_mode
+        value: '1'
+        owner: root
+        group: root
+        mode: '0644'

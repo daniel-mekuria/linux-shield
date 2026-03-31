@@ -1,0 +1,75 @@
+# Following 11 lines added by CISecurity Benchmark sec 4.1
+net.ipv4.tcp_max_syn_backlog = 4096
+# https://www.debian.org/doc/manuals/securing-debian-manual/network-secure.en.html#tcp-syncookies
+net.ipv4.tcp_syncookies=1
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.all.secure_redirects = 0
+net.ipv4.conf.all.shared_media = 0
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.default.secure_redirects = 0
+net.ipv4.conf.default.shared_media = 0
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+
+# Following 3 lines added by CISecurity Benchmark sec 4.2
+net.ipv4.ip_forward = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+# following lines are from system-hardening-10.2.txt
+
+# Enable/Disable log spoofed, source routed,redirect packets
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+
+# custom
+
+# IPv6
+# CIS RHEL6 4.4.1.1 Disable IPv6 Router Advertisements
+net.ipv6.conf.all.accept_ra = 0
+net.ipv6.conf.default.accept_ra = 0
+# 4.4.1.2 Disable IPv6 Redirect Acceptance
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+
+# disable IPv6
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+
+# set this to 1, if you don't want the system to reply to ICMP ECHO requests:
+net.ipv4.icmp_echo_ignore_all = 0
+
+# don't log RFC-1122 non-compliant ICMP responses
+net.ipv4.icmp_ignore_bogus_error_responses = 1
+
+net.ipv4.tcp_timestamps = 0
+
+# https://www.kernel.org/doc/html/latest/admin-guide/sysctl/net.html#bpf-jit-harden
+net.core.bpf_jit_harden = 2
+
+# ANSSI-BP-028 R12 - IPv4 configuration options
+# Consider as invalid the packets received from outside whose source
+# is the 127/8 network.
+net.ipv4.conf.all.accept_local = 0
+# RFC 1337
+net.ipv4.tcp_rfc1337 = 1
+# Refuse the routing of packets whose source or destination address is that
+# of the local loopback. This prohibits the transmission of packets with
+# source network 127/8.
+net.ipv4.conf.all.route_localnet = 0
+# Respond to ARP requests only if the source and destination addresses are on
+# the same network and come from the same interface on which the packet was received.
+# Note that the configuration of this option is to be studied according to the
+# use case.
+net.ipv4.conf.all.arp_ignore = 2
+# https://tools.ietf.org/html/rfc5227
+# Ignore gratuitous ARP requests. This configuration is
+# effective against ARP poisoning attacks but only applicable
+# in association with one or more controlled ARP proxies.
+# This option can be problematic on networks with devices
+# in a high availability setup (VRRP, etc.).
+#net.ipv4.conf.all.drop_gratuitous_arp = 1

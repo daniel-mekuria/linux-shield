@@ -1,0 +1,144 @@
+---
+# https://github.com/canonical/lightdm#configuration
+- name: Stat /etc/lightdm/lightdm.conf
+  ansible.builtin.stat:
+    path: /etc/lightdm/lightdm.conf
+  register: stat_result
+  tags:
+    - network
+    - configuration
+    - check
+    - lightdm
+- name: Configure LightDM
+  tags:
+    - configuration
+    - lightdm
+  when: stat_result.stat.exists
+  become: true
+  block:
+    - name: Disable VNC in LightDM
+      community.general.ini_file:
+        path: /etc/lightdm/lightdm.conf
+        section: VNCServer
+        option: enabled
+        value: "false"
+        owner: root
+        group: root
+        mode: '0644'
+      tags: network
+    - name: Hide user list and disallow guest login in LightDM
+      community.general.ini_file:
+        path: /etc/lightdm/lightdm.conf
+        section: Seat:*
+        option: '{{ item.key }}'
+        value: '{{ item.value }}'
+        owner: root
+        group: root
+        mode: '0644'
+      with_dict:
+        greeter-hide-users: "true"
+        allow-guest: "false"
+    - name: Create restrictive /etc/pam.d/lightdm-autologin
+      tags: pam
+      ansible.builtin.copy:
+        src: pam.d/other.new
+        dest: /etc/pam.d/lightdm-autologin
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+    - name: Comment out autologin-user from /etc/lightdm/lightdm.conf
+      ansible.builtin.replace:
+        regexp: '^(autologin-user.*)$'
+        replace: '#\g<1>'
+        path: /etc/lightdm/lightdm.conf
+        backup: true
+# CIS Debian Linux 10 Benchmark v1.0.0 - 02-13-2020
+# 1.8.2 Ensure GDM login banner is configured
+- name: Configure GDM3
+  tags:
+    - configuration
+    - banners
+    - gnome
+  ansible.builtin.replace:
+    regexp: '^(# ?)?({{ item.key }})=.+$'
+    replace: '\g<2>={{ item.value }}'
+    path: /etc/gdm3/greeter.dconf-defaults
+  with_dict:
+    disable-user-list: "true"
+    banner-message-enable: "true"
+    banner-message-text: "'Authorized uses only'"
+  become: true
+  register: result
+  failed_when:
+    - result.failed == true
+    - result.msg != "Path /etc/gdm3/greeter.dconf-defaults does not exist !"
+
+- name: GNOME settings
+  become: true
+  tags:
+    - configuration
+    - gnome
+  block:
+    - name: mkdir /etc/dconf/db/local.d
+      ansible.builtin.file:
+        path: /etc/dconf/db/local.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+    # DCONF(7): "On startup, dconf consults the DCONF_PROFILE environment variable.
+    # If set, dconf will attempt to open the named profile, aborting if that fails.
+    # If the environment variable is not set, it will attempt to open the profile
+    # named "user" and if that fails, it will fall back to an internal hard-wired configuration."
+    - name: Configure dconf to include local db
+      ansible.builtin.copy:
+        dest: /etc/dconf/profile/user
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+        content: |
+          user-db:user
+          system-db:local
+      register: result
+      failed_when:
+        - result.failed
+        - result.msg != "Destination directory /etc/dconf/profile does not exist"
+    # CIS Debian Linux 11 Benchmark v1.0.0 - 09-22-2022
+    #   1.8.6 Ensure GDM automatic mounting of removable media is disabled
+    # https://access.redhat.com/solutions/20107
+    - name: Disable GNOME automount
+      community.general.ini_file:
+        path: /etc/dconf/db/local.d/00-media-automount
+        section: org/gnome/desktop/media-handling
+        option: "{{ item.key }}"
+        value: "{{ item.value }}"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Run dconf update
+      with_dict:
+        automount: "false"
+        automount-open: "false"
+    # CIS Debian Linux 12 Benchmark v1.0.1 - 04-15-2024: 1.7.8 Ensure GDM autorun-never is enabled
+    - name: Disable GNOME autorun
+      community.general.ini_file:
+        path: /etc/dconf/db/local.d/00-media-autorun
+        section: org/gnome/desktop/media-handling
+        option: autorun-never
+        value: "true"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Run dconf update
+    - name: Set number of allowed authentication failures for GNOME login
+      community.general.ini_file:
+        path: /etc/dconf/db/local.d/00-allowed-failures
+        section: org/gnome/login-screen
+        option: allowed-failures
+        value: "{{ max_auth_tries }}"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Run dconf update

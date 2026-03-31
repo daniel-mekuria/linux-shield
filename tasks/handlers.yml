@@ -1,0 +1,179 @@
+---
+- name: Run update-ca-certificates
+  become: true
+  when: ansible_facts['os_family'] != "RedHat"
+  ansible.builtin.command: /usr/sbin/update-ca-certificates --verbose --fresh
+  tags:
+    - configuration
+    - pki
+  register: result
+  changed_when: '"0 added, 0 removed; done." not in result.stdout'
+# This will usually return 255 with "sysctl: cannot stat /proc/.+: No such file or directory"
+- name: Load sysctl settings
+  become: true
+  ansible.builtin.command: /sbin/sysctl -p /etc/sysctl.d/sysctl.conf /etc/sysctl.d/network.conf
+  tags: kernel
+  register: result
+  failed_when:
+    - result.failed
+    - result.rc != 255
+    - "'sysctl: cannot stat' not in result.stderr"
+    # Might be a container that doesn't have procps-ng
+    - "'No such file or directory' not in result.msg"
+    - (result.rc != 2 and "'Error executing command.' not in result.msg")
+  changed_when: true
+- name: Create rkhunter.dat
+  ansible.builtin.command: /usr/bin/rkhunter --propupd
+  become: true
+  tags: rkhunter
+  changed_when: true
+# This takes a long time so we do it async
+- name: Create aide.db
+  ansible.builtin.command: /usr/sbin/aideinit --yes --force
+  tags: aide
+  become: true
+  async: 3600
+  poll: 0
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+  changed_when: true
+- name: Create aide.db (Slackware)
+  ansible.builtin.command: /usr/bin/aide -i
+  args:
+    creates: /var/lib/aide/aide.db.new
+  tags:
+    - aide
+    - slackware
+  become: true
+  notify: "Copy aide.db.new to aide.db"
+  when: ansible_facts['distribution'] == "Slackware"
+- name: Copy aide.db.new to aide.db
+  when: ansible_facts['distribution'] == "Slackware"
+  become: true
+  ansible.builtin.copy:
+    remote_src: true
+    src: /var/lib/aide/aide.db.new
+    dest: /var/lib/aide/aide.db
+    owner: root
+    group: root
+    mode: '0600'
+- name: Run pam-auth-update
+  ansible.builtin.command: /usr/sbin/pam-auth-update --package
+  become: true
+  tags:
+    - pam
+    - configuration
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+  changed_when: true
+- name: Check SSH daemon service state (Slackware)
+  listen: Restart sshd (Slackware)
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"
+  ansible.builtin.stat:
+    path: /etc/rc.d/rc.sshd
+  register: rc_sshd
+# rc.sshd exits if /var/run/sshd.pid doesn't exist
+- name: Restart sshd through /etc/rc.d/rc.sshd
+  listen: Restart sshd (Slackware)
+  when: ansible_facts['distribution'] == "Slackware" and rc_sshd.stat.exists and rc_sshd.stat.xusr
+  become: true
+  ansible.builtin.command: /bin/sh /etc/rc.d/rc.sshd restart
+  register: result
+  changed_when: true
+  failed_when:
+    - result.failed == true
+    - '"WARNING: There does not appear to be a parent instance of sshd running." not in result.stdout'
+  tags:
+    - services
+    - slackware
+- name: Check SSH daemon service state
+  ansible.builtin.service_facts:
+  listen: "Restart sshd (Debian)"
+- name: Restart sshd through systemd
+  become: true
+  listen: "Restart sshd (Debian)"
+  ansible.builtin.service:
+    name: ssh
+    state: restarted
+  when: >
+    (ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu") and
+    ansible_facts.services.ssh.state == "running"
+  tags: services
+- name: Run systemctl daemon-reload
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+  tags: molecule-notest
+- name: Run update-grub
+  become: true
+  ansible.builtin.command: /usr/sbin/update-grub
+  changed_when: true
+- name: Run dconf update
+  become: true
+  ansible.builtin.shell: umask 022 && dconf update
+  register: result
+  failed_when:
+    - result.failed
+    - result.rc != 127
+    - '"dconf: not found" not in result.stderr'
+  # dconf seems to always update the db files
+  changed_when: result.rc == 0
+# For installation of logrotate package
+# If/when "permissions" is applied before "logging"
+- name: chmod cron
+  become: true
+  ansible.builtin.file:
+    path: /etc/{{ item }}
+    mode: g-rwx,o-rwx
+  with_items:
+    - cron.d
+    - cron.hourly
+    - cron.daily
+    - cron.weekly
+    - cron.monthly
+    - crontab
+  register: result
+  failed_when:
+    - result.failed
+    - '"is absent, cannot continue" not in result.msg'
+- name: getent passwd
+  ansible.builtin.getent:
+    database: passwd
+  listen: "Update ftpusers"
+- name: Create /etc/ftpusers
+  become: true
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/ftpusers.j2"
+    dest: /etc/ftpusers
+    owner: root
+    group: root
+    mode: '0600'
+  listen: "Update ftpusers"
+- name: Lock Debian-exim account
+  become: true
+  ansible.builtin.user:
+    name: Debian-exim
+    shell: /sbin/nologin
+    expires: '{{ 60 * 60 * 24 }}'
+    password_lock: true
+- name: Restrict cron 1/2 (create /etc/cron.allow)
+  become: true
+  listen: "Restrict cron"
+  ansible.builtin.file:
+    path: /etc/cron.allow
+    state: touch
+    owner: root
+    # This group does not exist if package "cron" is not installed
+    group: crontab
+    mode: '0640'
+    access_time: preserve
+    modification_time: preserve
+- name: Restrict cron 2/2 (remove /etc/cron.deny)
+  become: true
+  listen: "Restrict cron"
+  ansible.builtin.file:
+    path: /etc/cron.deny
+    state: absent
+- name: Run freshclam
+  become: true
+  ansible.builtin.command: /usr/local/bin/freshclam
+  changed_when: true

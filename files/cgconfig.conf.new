@@ -1,0 +1,671 @@
+#
+#  Copyright IBM Corporation. 2007
+#
+#  Authors:	Balbir Singh <balbir@linux.vnet.ibm.com>
+#  This program is free software; you can redistribute it and/or modify it
+#  under the terms of version 2.1 of the GNU Lesser General Public License
+#  as published by the Free Software Foundation.
+#
+#  This program is distributed in the hope that it would be useful, but
+#  WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+group daemons/crond {
+	perm {
+# who can add tasks to this group
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+# who can manage limits
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x72636e6f;
+	}
+}
+group daemons/syslogd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x7379736c;
+	}
+}
+group daemons/smartd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x736d6172;
+	}
+}
+group daemons/acpid {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x61637069;
+	}
+}
+group daemons/haveged {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x68617665;
+	}
+}
+group daemons/NetworkManager {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x4e657477;
+	}
+}
+group daemons/dbus-daemon {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x64627573;
+	}
+}
+group daemons/udevd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x75646576;
+	}
+}
+group daemons/ntpd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x6e747064;
+	}
+}
+group daemons/httpd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x68747470;
+	}
+}
+group daemons/sshd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x73736864;
+	}
+}
+group daemons/postfix {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x706f7374;
+	}
+}
+group daemons/krb5 {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x6b726235;
+	}
+}
+group daemons/auditd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/clamav {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x636c616d;
+	}
+}
+group daemons/openldap {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x6c646170;
+	}
+}
+group daemons/opendkim {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x646b696d;
+	}
+}
+group daemons/nagios {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/collectd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/arpwatch {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+		net_cls.classid = 0x61727077;
+	}
+}
+group daemons/icmpinfo {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/mdadm {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/rpc-gssd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/rpc {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/usbguard {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/pcscd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/autofs {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/snort {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/polkitd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/dockerd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/amavisd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/dovecot {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/opendmarc {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/oidentd {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group daemons/icecream {
+	perm {
+		task {
+			uid = root;
+			gid = root;
+			fperm = 600;
+		}
+		admin {
+			uid = root;
+			gid = root;
+			dperm = 700;
+			fperm = 600;
+		}
+	}
+	net_cls {
+	}
+}
+group users {
+	cpuacct{
+	}
+	cpu {
+	}
+	net_cls {
+	}
+}
+template users/%u {
+	cpuacct{
+	}
+	cpu {
+	}
+	net_cls {
+	}
+}
+# https://www.chriswilling.com/lxc/setup-unpriv-slackware.html
+#group lxc {
+#	perm {
+#		task {
+#			uid = pyllyukko;
+#			gid = users;
+#		}
+#		admin {
+#			uid = pyllyukko;
+#			gid = users;
+#		}
+#	}
+#
+#	cpuset {
+#		cgroup.clone_children = 1;
+#		cpuset.mems = 0;
+#		cpuset.cpus = 0-3;
+#	}
+#	cpu {}
+#	cpuacct {}
+#	blkio {}
+#	memory { memory.use_hierarchy = 1; }
+#	devices {}
+#	freezer {}
+#	net_cls {}
+#	perf_event {}
+#	net_prio {}
+#	pids {}
+#}

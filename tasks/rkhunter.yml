@@ -1,0 +1,157 @@
+---
+- name: rkhunter
+  tags: rkhunter
+  become: true
+  block:
+    - name: Install rkhunter (Debian)
+      ansible.builtin.apt:
+        name: rkhunter
+        update_cache: true
+      when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+      tags:
+        - packages
+        - debian
+    # For ALLOWHIDDENDIR=/etc/.pihole
+    - name: getent passwd
+      ansible.builtin.getent:
+        database: passwd
+      tags: check
+    - name: USER_FILEPROP_FILES_DIRS
+      tags: check
+      block:
+        - name: Get package_facts to check if libwww-perl package is installed (Debian)
+          when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+          tags: debian
+          ansible.builtin.package_facts:
+            manager: auto
+        - name: Stat /etc/polkit-1/rules.d
+          ansible.builtin.stat:
+            path: /etc/polkit-1/rules.d
+          register: stat_polkit_etc
+        - name: Check for files to be included in rkhunter.conf USER_FILEPROP_FILES_DIRS
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - /etc/ld.so.preload
+            - /usr/bin/aide
+            - /var/lib/aide/aide.db
+            # This is here instead of rkhunter.conf.j2 because of the Molecule tests
+            - /etc/ssh/sshd_config
+            - /etc/nftables.conf
+          register: files_for_rkhunter
+        - name: Build a list of files to check in rkhunter.conf USER_FILEPROP_FILES_DIRS
+          ansible.builtin.set_fact:
+            files_for_rkhunter: >-
+              {{ files_for_rkhunter.results | selectattr('stat.exists') | map(attribute='item') | list }}
+        # We need to do this, because if you add only the dir (e.g.
+        # /etc/cron.d), rkhunter will expand PROP_FILE_LIST into that dir (e.g.
+        # /etc/cron.d/adduser, /etc/cron.d/amd etc.)
+        #
+        # Also when you add e.g. /etc/cron.yearly/* and the directory is empty
+        # you'll get "Invalid USER_FILEPROP_FILES_DIRS configuration option:
+        # Non-existent pathname: /etc/cron.yearly/*"
+        - name: Check a bunch of dirs for content
+          ansible.builtin.find:
+            paths: "{{ item }}"
+            file_type: any
+            recurse: false
+            patterns: '*'
+            hidden: false
+          register: rkhunter_dirs_find
+          changed_when: false
+          with_items:
+            - /etc/cron.d
+            - /etc/cron.hourly
+            - /etc/cron.daily
+            - /etc/cron.weekly
+            - /etc/cron.monthly
+            - /etc/cron.yearly
+            - /etc/sudoers.d
+            - /etc/polkit-1/rules.d
+            - /etc/ld.so.conf.d
+            - /var/spool/cron/crontabs
+            - /etc/security/limits.d
+            - /etc/security/namespace.d
+        - name: Build list of dirs to check in rkhunter.conf USER_FILEPROP_FILES_DIRS
+          ansible.builtin.set_fact:
+            non_empty_dirs: "{{ rkhunter_dirs_find.results | selectattr('matched', '>', 0) | map(attribute='item') | list }}"
+    - name: SCRIPTWHITELIST
+      tags: check
+      block:
+        - name: Check for files to be included in rkhunter.conf SCRIPTWHITELIST
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          with_items:
+            # Debian
+            - /etc/cron.daily/apache2
+            - /etc/cron.daily/apt-compat
+            - /etc/cron.daily/chkrootkit
+            - /etc/cron.daily/sysstat
+            - /etc/cron.weekly/man-db
+            # Slackware
+            - /etc/cron.daily/mlocate
+            - /etc/cron.daily/dehydrated
+            - /etc/cron.daily/certwatch
+            # Both
+            - /etc/cron.daily/logrotate
+            - /etc/cron.daily/man-db
+            - /etc/nftables.conf
+            # As instructed in logwatch's README: "ln -s /usr/share/logwatch/scripts/logwatch.pl /etc/cron.daily/0logwatch"
+            - /usr/share/logwatch/scripts/logwatch.pl
+          register: files_for_rkhunter_scriptwhitelist
+        - name: Build a list of files to include in rkhunter.conf SCRIPTWHITELIST
+          ansible.builtin.set_fact:
+            files_for_rkhunter_scriptwhitelist: >-
+              {{ files_for_rkhunter_scriptwhitelist.results | selectattr('stat.exists') | map(attribute='item') | list }}
+        - name: Find all .sh files in cron dirs
+          ansible.builtin.find:
+            paths: "{{ item }}"
+            file_type: file
+            recurse: false
+            patterns: "*.sh"
+            hidden: false
+          register: rkhunter_sh_find
+          changed_when: false
+          with_items:
+            - /etc/cron.d
+            - /etc/cron.hourly
+            - /etc/cron.daily
+            - /etc/cron.weekly
+            - /etc/cron.monthly
+            - /etc/cron.yearly
+        - name: Build flat list of found .sh file paths
+          ansible.builtin.set_fact:
+            sh_files: "{{ rkhunter_sh_find.results | map(attribute='files') | sum(start=[]) | map(attribute='path') | list }}"
+    - name: 'Create /etc/rkhunter.conf'
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/templates/rkhunter.conf.j2"
+        dest: /etc/rkhunter.conf
+        mode: '0400'
+        owner: root
+        group: root
+        backup: true
+      tags: configuration
+      notify: "Create rkhunter.dat"
+    # https://sourceforge.net/p/rkhunter/rkh_code/ci/master/tree/files/FAQ: "3.3) How can I automatically run Rootkit Hunter every day?"
+    # We don't use --update as rkhunter.sourceforge.net doesn't have HTTPS
+    - name: Add rkhunter cronjob
+      ansible.builtin.cron:
+        name: "Run rkhunter"
+        minute: "30"
+        hour: "5"
+        job: "/usr/bin/test -x /usr/bin/rkhunter && /usr/bin/rkhunter --cronjob --rwo"
+      when: ansible_facts['distribution'] != "Debian"
+      tags: configuration
+    - name: Configure Debian specific rkhunter settings in /etc/default/rkhunter
+      ansible.builtin.replace:
+        path: /etc/default/rkhunter
+        regexp: '^({{ item.key }}=).*'
+        replace: '\g<1>"{{ item.value }}"'
+      when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+      with_dict:
+        CRON_DAILY_RUN: "yes"
+        APT_AUTOGEN: "yes"
+        REPORT_EMAIL: "{{ alert_email }}"
+      tags:
+        - configuration
+        - debian

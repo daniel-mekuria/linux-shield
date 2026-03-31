@@ -1,0 +1,161 @@
+---
+- name: Debian SSH checks
+  when: ansible_facts['distribution'] == "Debian" or ansible_facts['distribution'] == "Kali" or ansible_facts['distribution'] == "Ubuntu"
+  tags:
+    - ssh
+    - debian
+    - check
+  block:
+    - name: Check SSH daemon service state
+      ansible.builtin.service_facts:
+      tags: services
+    - name: Check if SSH client is installed (Debian)
+      ansible.builtin.package_facts:
+        manager: auto
+- name: Check SSH daemon service state (Slackware)
+  become: true
+  when: ansible_facts['distribution'] == "Slackware"
+  ansible.builtin.stat:
+    path: /etc/rc.d/rc.sshd
+  register: rc_sshd
+  tags:
+    - ssh
+    - slackware
+    - check
+
+# This is used in sshd_config.j2 template(s)
+- name: Stat /etc/krb5.keytab
+  ansible.builtin.stat:
+    path: /etc/krb5.keytab
+  register: stat_keytab
+  tags:
+    - ssh
+    - check
+# Slackware has only the openssh package, which provides both server and client
+- name: SSH in Slackware
+  become: true
+  when: >
+    ansible_facts['distribution'] == "Slackware" and rc_sshd.stat.exists
+  tags:
+    - services
+    - configuration
+    - ssh
+    - slackware
+  block:
+    - name: Create /etc/ssh/ssh{,d}_config.d directories
+      ansible.builtin.file:
+        path: '{{ item.key }}'
+        state: directory
+        mode: '{{ item.value }}'
+        owner: root
+        group: root
+      with_dict:
+        /etc/ssh/sshd_config.d: '0700'
+        /etc/ssh/ssh_config.d: '0755'
+    - name: Add Include sshd_config.d to /etc/ssh/sshd_config
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^Include\s+/etc/ssh/sshd_config\.d/\*\.conf$'
+        insertbefore: '^#?Port\s+[0-9]+$'
+        line: "Include /etc/ssh/sshd_config.d/*.conf\n"
+        backup: true
+      notify:
+        - "Restart sshd (Slackware)"
+    - name: Add Include ssh_config.d to /etc/ssh/ssh_config
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/ssh_config
+        regexp: '^Include\s+/etc/ssh/ssh_config\.d/\*\.conf$'
+        insertbefore: '^(#\s*)?Host\s+\*$'
+        line: "Include /etc/ssh/ssh_config.d/*.conf\n"
+        backup: true
+# We can't use validate here.
+# If SSHd has never been started, "sshd -t -f" might fail with at least the following errors:
+#   - sshd: no hostkeys available -- exiting.
+#   - Missing privilege separation directory: /run/sshd
+# And in such case the hardening configuration does not get created.
+# We want to harden the SSHd even in cases where it has been installed, but not used.
+- name: Harden SSH daemon configuration
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/sshd_config.j2"
+    dest: /etc/ssh/sshd_config.d/harden.conf
+    owner: root
+    group: root
+    mode: '0600'
+    backup: true
+  tags:
+    - services
+    - configuration
+    - ssh
+  notify:
+    - "Restart sshd (Debian)"
+    - "Restart sshd (Slackware)"
+  become: true
+  # Skip the task in Debian if openssh-server package does not exist
+  when: >
+    (
+      ansible_facts['distribution'] in ["Debian", "Kali", "Ubuntu"] and
+      'openssh-server' in ansible_facts.packages
+    )
+    or
+    (ansible_facts['distribution'] == "Slackware" and rc_sshd.stat.exists)
+
+- name: Harden SSH client configuration
+  tags:
+    - configuration
+    - ssh
+  become: true
+  when: >
+    (
+      ansible_facts['distribution'] in ["Debian", "Kali", "Ubuntu"] and
+      "openssh-client" in ansible_facts.packages
+    )
+    or
+    (ansible_facts['distribution'] == "Slackware" and rc_sshd.stat.exists)
+  ansible.builtin.template:
+    src: ssh_config.j2
+    dest: /etc/ssh/ssh_config.d/harden.conf
+    owner: root
+    group: root
+    mode: '0644'
+# These are only used if you have diffie-hellman-group-exchange-sha* key exchanges enabled in sshd_config.
+- name: Remove 2048-bit moduli from /etc/ssh/moduli
+  become: true
+  tags:
+    - pki
+    - configuration
+    - ssh
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/moduli
+    state: absent
+    regexp: '^[0-9]{14}\s+[0-9]+\s+[0-9]+\s+[0-9]+\s+2047\b'
+    backup: true
+#- name: Set SSH_USE_STRONG_RNG for sshd (RH)
+#  when: ansible_facts['os_family'] == "RedHat"
+#  become: true
+#  tags:
+#    - configuration
+#    - ssh
+#    - centos
+#  ansible.builtin.lineinfile:
+#    path: /etc/sysconfig/sshd
+#    state: present
+#    regexp: '^SSH_USE_STRONG_RNG=[0-9]+$'
+#    line: 'SSH_USE_STRONG_RNG=32'
+#    backup: true
+
+- name: Print Lynis score for SSH hardening
+  become: true
+  tags: ssh
+  when: run_lynis_after_hardening
+  block:
+    - name: Run Lynis test group SSH hardening
+      ansible.builtin.command: lynis audit system -q --skip-plugins --tests-from-group ssh # noqa no-changed-when
+      tags: check
+    - name: slurp /var/log/lynis.log
+      ansible.builtin.slurp:
+        src: /var/log/lynis.log
+      no_log: true
+      register: lynis_log
+    - name: Print Lynis score for SSH hardening
+      ansible.builtin.debug:
+        msg: "{{ lynis_log['content'] | b64decode | regex_search('Hardening index : \\[([0-9]+)\\]', '\\1', multiline=True) }}"
